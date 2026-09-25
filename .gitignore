@@ -2,6 +2,9 @@
 .DS_Store
 Thumbs.db
 
+# Local agent guidance
+AGENTS.md
+
 # Editor and IDE settings
 .vscode/
 .idea/
@@ -18,6 +21,7 @@ Thumbs.db
 *.log
 tmp/
 temp/
+.firecrawl/
 
 # Python artifacts
 __pycache__/

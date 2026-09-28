@@ -32,25 +32,16 @@ def load_reservoir_data() -> tuple[pd.DataFrame, pd.DataFrame]:
     numeric fill level a column, ready for the required row-wise sparklines.
     """
     source = pd.read_csv(CSV_PATH)
-    missing_columns = COLUMN_NAMES.keys() - source.columns
-    if missing_columns:
-        raise ValueError(f"Missing CSV columns: {', '.join(sorted(missing_columns))}")
-
     source = source.rename(columns=COLUMN_NAMES)
     source["Observation Date"] = pd.to_datetime(
         source["Observation Date"], format="%Y-%m-%d", errors="raise"
     )
-    # Year 0001 in the CSV marks an unavailable publication date.
     source["Next Publication Date"] = pd.to_datetime(
         source["Next Publication Date"], format="ISO8601", errors="coerce"
     )
     source = source.sort_values(
         ["Observation Date", "Area Type", "Area Code"]
     ).reset_index(drop=True)
-
-    area_key = ["Observation Date", "Area Type", "Area Code"]
-    if source.duplicated(area_key).any():
-        raise ValueError("The CSV contains more than one fill level for a date and area.")
 
     # Every column of this wide table is one numeric reservoir-area series.
     fill_levels = source.pivot(

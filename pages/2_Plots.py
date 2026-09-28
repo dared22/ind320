@@ -3,6 +3,7 @@
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import pandas as pd
+import seaborn as sns
 import streamlit as st
 
 from data import load_reservoir_data
@@ -28,10 +29,28 @@ selected = fill_levels.loc[
 ]
 areas_to_plot = fill_levels.columns if chosen_area == "All areas" else [chosen_area]
 
-# All nine series share a unit, so an unnormalised comparison is meaningful.
+# Reshape the numeric series for Seaborn's area grouping. Every series shares
+# a percentage unit, so the original values can be compared on one axis.
+plot_data = selected.loc[:, areas_to_plot].rename_axis("Observation date").reset_index()
+plot_data = plot_data.melt(
+    id_vars="Observation date",
+    var_name="Area",
+    value_name="Reservoir filling (%)",
+)
+
+# Seaborn draws the lines; Matplotlib still provides the figure and date ticks.
 fig, ax = plt.subplots(figsize=(10, 5))
-for area in areas_to_plot:
-    ax.plot(selected.index, selected[area], label=area, linewidth=2)
+sns.lineplot(
+    data=plot_data,
+    x="Observation date",
+    y="Reservoir filling (%)",
+    hue="Area",
+    hue_order=list(areas_to_plot),
+    estimator=None,
+    errorbar=None,
+    linewidth=2,
+    ax=ax,
+)
 
 ax.set_title(f"Weekly filling levels · {start_month} to {end_month}")
 ax.set_xlabel("Observation date")

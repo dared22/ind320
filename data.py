@@ -36,12 +36,6 @@ def load_reservoir_data() -> tuple[pd.DataFrame, pd.DataFrame]:
     source["Observation Date"] = pd.to_datetime(
         source["Observation Date"], format="%Y-%m-%d", errors="raise"
     )
-    source["Next Publication Date"] = pd.to_datetime(
-        source["Next Publication Date"], format="ISO8601", errors="coerce"
-    )
-    source = source.sort_values(
-        ["Observation Date", "Area Type", "Area Code"]
-    ).reset_index(drop=True)
 
     # Every column of this wide table is one numeric reservoir-area series.
     fill_levels = source.pivot(

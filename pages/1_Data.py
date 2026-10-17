@@ -3,21 +3,23 @@
 import pandas as pd
 import streamlit as st
 
-from data import load_reservoir_data
+from data import ReservoirDataError, load_reservoir_data, unusual_fill_levels
 
 
 st.title("Data table")
-source, fill_levels = load_reservoir_data()
+try:
+    source, fill_levels = load_reservoir_data()
+except ReservoirDataError as exc:
+    st.error(str(exc))
+    st.stop()
 
-# The earliest calendar month has four weekly readings for every area.
+# Use the earliest observed month; newer series may have no readings then.
 first_month = fill_levels.index.min().to_period("M")
-first_month_levels = fill_levels.loc[
-    fill_levels.index.to_period("M") == first_month
-]
+first_month_levels = fill_levels.loc[fill_levels.index.to_period("M") == first_month]
 
 st.write(
     "Each row below represents one numeric fill-level series imported from "
-    "the CSV. The line shows every weekly observation in the first month."
+    "NVE. The line shows every weekly observation in the first month."
 )
 summary = pd.DataFrame(
     {
@@ -33,16 +35,23 @@ st.caption(f"First available month: {first_month.strftime('%B %Y')}")
 st.dataframe(
     summary,
     column_config={
-        "First month trend": st.column_config.LineChartColumn(
-            "First month trend (%)"
-        )
+        "First month trend": st.column_config.LineChartColumn("First month trend (%)")
     },
     hide_index=True,
     width="stretch",
 )
 
-st.subheader("Imported CSV records")
+st.subheader("NVE API records")
 st.caption(
-    f"The original {len(source):,} records, sorted by date and shown with English headers."
+    f"The {len(source):,} API records, sorted by date and shown with English headers."
 )
 st.dataframe(source, hide_index=True, height=360, width="stretch")
+
+# Keep unusual source readings visible rather than clipping chart values.
+unusual = unusual_fill_levels(source)
+if not unusual.empty:
+    st.warning(
+        f"{len(unusual)} fill-level readings lie outside 0–100%; values are preserved."
+    )
+    with st.expander("Inspect unusual readings"):
+        st.dataframe(unusual, hide_index=True)

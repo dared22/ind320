@@ -2,19 +2,22 @@
 
 import streamlit as st
 
-from data import load_reservoir_data
+from data import ReservoirDataError, load_reservoir_data
 
 
 st.title("Norwegian reservoir filling")
-st.caption("IND320 · Project work, part 1")
+st.caption("IND320 · Project work, part 2 · Reservoir API")
 st.write(
-    "Explore weekly reservoir filling levels for the nine areas in the course "
-    "dataset. Use the sidebar to open the data table, interactive plot, or "
+    "Explore the available weekly reservoir area series from the NVE API. Use the sidebar to open the data table, interactive plot, or "
     "information page."
 )
 
 # The summary uses the same cached data as the table and plot pages.
-source, fill_levels = load_reservoir_data()
+try:
+    source, fill_levels = load_reservoir_data()
+except ReservoirDataError as exc:
+    st.error(str(exc))
+    st.stop()
 first_date = fill_levels.index.min().strftime("%d %b %Y")
 last_date = fill_levels.index.max().strftime("%d %b %Y")
 
@@ -24,5 +27,7 @@ areas_col.metric("Area series", len(fill_levels.columns))
 dates_col.metric("Date range", f"{first_date}–{last_date}")
 
 st.subheader("Start here")
-st.page_link("pages/1_Data.py", label="View first-month trends and source data", icon="📋")
+st.page_link(
+    "pages/1_Data.py", label="View first-month trends and source data", icon="📋"
+)
 st.page_link("pages/2_Plots.py", label="Choose areas and months to plot", icon="📈")

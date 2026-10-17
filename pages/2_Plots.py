@@ -2,17 +2,20 @@
 
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
-import pandas as pd
 import seaborn as sns
 import streamlit as st
 
-from data import load_reservoir_data
+from data import INTERVAL_NOTICE, ReservoirDataError, load_reservoir_data
 
 
 st.title("Reservoir filling over time")
-st.write("Select one area or compare all nine areas on the same percentage scale.")
+st.write("Select one area or compare all available areas on the same percentage scale.")
 
-_, fill_levels = load_reservoir_data()
+try:
+    _, fill_levels = load_reservoir_data()
+except ReservoirDataError as exc:
+    st.error(str(exc))
+    st.stop()
 months = fill_levels.index.to_period("M").unique().astype(str).tolist()
 
 # The first month is the default for both ends of the selection range.
@@ -23,11 +26,18 @@ start_month, end_month = st.select_slider(
     value=(months[0], months[0]),
 )
 
-periods = fill_levels.index.to_period("M")
-selected = fill_levels.loc[
-    (periods >= pd.Period(start_month)) & (periods <= pd.Period(end_month))
-]
-areas_to_plot = fill_levels.columns if chosen_area == "All areas" else [chosen_area]
+# Selection enters the shared retrieval interface; upstream history is cached.
+try:
+    _, selected = load_reservoir_data(start_month, end_month)
+except ReservoirDataError as exc:
+    st.error(str(exc))
+    st.stop()
+st.caption(INTERVAL_NOTICE)
+# An area present in the full history may have no observations in this interval.
+if chosen_area != "All areas" and chosen_area not in selected.columns:
+    st.info(f"No observations for {chosen_area} in the selected months.")
+    st.stop()
+areas_to_plot = selected.columns if chosen_area == "All areas" else [chosen_area]
 
 # Reshape the numeric series for Seaborn's area grouping. Every series shares
 # a percentage unit, so the original values can be compared on one axis.
@@ -63,4 +73,4 @@ fig.tight_layout()
 st.pyplot(fig, width="stretch")
 plt.close(fig)
 
-st.caption(f"{len(selected)} weekly dates shown. Source: local reservoirs.csv.")
+st.caption(f"{len(selected)} weekly dates shown. Source: NVE reservoir API.")

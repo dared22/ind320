@@ -4,12 +4,22 @@ version = "0.1.0"
 description = "IND320 reservoir filling data analysis notebook"
 requires-python = ">=3.10,<3.11"
 dependencies = [
-    "ipykernel>=7.3.0",
-    "jupyter>=1.1.1",
     "matplotlib>=3.10.9",
     "pandas>=2.3.3",
     "seaborn>=0.13.2",
     "streamlit>=1.64.0",
+    "requests==2.32.5",
+    "pymongo==4.15.3",
+    "python-dotenv==1.2.1",
+]
+
+[dependency-groups]
+# Install locally with uv sync --group notebook. Cloud installs only defaults.
+notebook = [
+    "ipykernel>=7.3.0",
+    "jupyter>=1.1.1",
+    "pyspark==3.5.1",
+    "cassandra-driver==3.29.2",
 ]
 
 [tool.uv]

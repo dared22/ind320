@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import streamlit as st
 
-from reservoir_controls import reservoir_selection
+from ind320.ui.reservoir_controls import reservoir_selection
 
 st.title("Reservoir filling over time")
 st.write("Select one area or compare all available areas on the same percentage scale.")

@@ -3,8 +3,8 @@
 import pandas as pd
 import streamlit as st
 
-from data import unusual_fill_levels
-from reservoir_controls import reservoir_selection
+from ind320.data.reservoirs import unusual_fill_levels
+from ind320.ui.reservoir_controls import reservoir_selection
 
 st.title("Data table")
 source, levels = reservoir_selection()

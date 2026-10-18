@@ -4,8 +4,8 @@ from contextlib import contextmanager
 import pandas as pd
 from pymongo import MongoClient, ReplaceOne
 
-from config import get_setting
-from transfers import (
+from ind320.config import get_setting
+from ind320.data.transfers import (
     SOURCE,
     annual_totals,
     clip_intervals,

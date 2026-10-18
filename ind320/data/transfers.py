@@ -5,7 +5,7 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-from config import get_setting
+from ind320.config import get_setting
 
 API_URL = "https://web-api.tp.entsoe.eu/api"
 SOURCE = "ENTSO-E Transparency Platform, A11 cross-border physical flows"

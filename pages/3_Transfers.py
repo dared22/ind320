@@ -6,8 +6,8 @@ import matplotlib.pyplot as plt
 import streamlit as st
 
 from pymongo.errors import PyMongoError
-from mongo_store import available_transfers, query_annual, query_months
-from transfer_charts import energy_pie, transfer_lines
+from ind320.storage.mongo_store import available_transfers, query_annual, query_months
+from ind320.ui.transfer_charts import energy_pie, transfer_lines
 
 # Cache database reads briefly, separately from widget choices and local processing.
 choices = st.cache_data(ttl=300)(available_transfers)

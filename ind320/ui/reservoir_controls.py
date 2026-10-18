@@ -1,7 +1,7 @@
 import pandas as pd
 import streamlit as st
 
-from data import INTERVAL_NOTICE, load_reservoir_data
+from ind320.data.reservoirs import INTERVAL_NOTICE, load_reservoir_data
 
 
 def _save_selection(widget_key: str, saved_key: str) -> None:

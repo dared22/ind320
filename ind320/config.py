@@ -3,7 +3,8 @@ from pathlib import Path
 
 from dotenv import dotenv_values
 
-ROOT = Path(__file__).resolve().parent
+# Resolve private settings from the project root after moving into the package.
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def get_setting(name: str, default: str = "") -> str:

@@ -2,15 +2,14 @@ import os
 import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
-from pathlib import Path
 
 import pandas as pd
 from cassandra.auth import PlainTextAuthProvider
 from cassandra.cluster import Cluster
 from pyspark.sql import SparkSession
 
-from config import get_setting
-from transfers import COLUMNS, prepare_intervals
+from ind320.config import ROOT, get_setting
+from ind320.data.transfers import COLUMNS, prepare_intervals
 
 SPARK_CASSANDRA_PACKAGE = "com.datastax.spark:spark-cassandra-connector_2.12:3.5.1"
 
@@ -48,7 +47,7 @@ def local_databases() -> Iterator[tuple[SparkSession, str]]:
             SparkSession.builder.master("local[2]")
             .appName("IND320 transfers")
             .config("spark.jars.packages", SPARK_CASSANDRA_PACKAGE)
-            .config("spark.jars.ivy", str(Path(__file__).parent / ".local/ivy"))
+            .config("spark.jars.ivy", str(ROOT / ".local/ivy"))
             .config("spark.cassandra.connection.host", host)
             .config("spark.cassandra.connection.port", str(port))
             # Keep notebook writes gentle on a single local Cassandra node.

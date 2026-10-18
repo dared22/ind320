@@ -2,7 +2,7 @@
 
 import streamlit as st
 
-from data import INTERVAL_NOTICE, load_area_metadata
+from ind320.data.reservoirs import INTERVAL_NOTICE, load_area_metadata
 
 st.title("About this dashboard")
 st.write(

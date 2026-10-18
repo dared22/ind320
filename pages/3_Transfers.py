@@ -5,10 +5,9 @@ import calendar
 import matplotlib.pyplot as plt
 import streamlit as st
 
-from config import ConfigurationError
-from mongo_store import available_transfers, query_annual, query_coverage, query_months
+from pymongo.errors import PyMongoError
+from mongo_store import available_transfers, query_annual, query_months
 from transfer_charts import energy_pie, transfer_lines
-from transfers import TransferError
 
 # Cache database reads briefly, separately from widget choices and local processing.
 choices = st.cache_data(ttl=300)(available_transfers)
@@ -40,21 +39,10 @@ try:
                     st.warning(
                         "Incomplete coverage: energy totals include observed intervals only."
                     )
+                st.caption("Totals include all observed months of the selected year.")
                 figure = energy_pie(summary)
                 st.pyplot(figure)
                 plt.close(figure)
-                st.dataframe(
-                    summary[
-                        [
-                            "direction",
-                            "energy_mwh",
-                            "observed_hours",
-                            "expected_hours",
-                            "complete",
-                        ]
-                    ],
-                    hide_index=True,
-                )
         with right:
             months = st.pills(
                 "Months",
@@ -66,21 +54,6 @@ try:
             if not months:
                 st.info("Select one or more months to see directional flows.")
             else:
-                coverage = query_coverage(connection, year, months)
-                if not coverage.empty:
-                    st.dataframe(
-                        coverage[
-                            [
-                                "month",
-                                "direction",
-                                "observed_hours",
-                                "expected_hours",
-                                "complete",
-                                "message",
-                            ]
-                        ],
-                        hide_index=True,
-                    )
                 data = intervals(connection, year, months)
                 if data.empty:
                     st.info("No observations are available for these months.")
@@ -91,8 +64,9 @@ try:
                     st.caption(
                         f"{len(data):,} observed intervals. Gaps and omitted months are not connected."
                     )
-except (ConfigurationError, TransferError) as exc:
-    st.error(str(exc))
+except (PyMongoError, ValueError):
+    # Show a short message rather than database connection details.
+    st.error("Could not read MongoDB. Check your connection and private settings.")
 # Keep the required source explanation visible even when credentials are missing.
 with st.expander("Sources, coverage, and processing"):
     st.write(

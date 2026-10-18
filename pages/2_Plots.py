@@ -15,10 +15,6 @@ _, selected = reservoir_selection()
 chosen_area = st.selectbox("Area series", ["All areas", *selected.columns])
 start_month = selected.index.min().strftime("%Y-%m")
 end_month = selected.index.max().strftime("%Y-%m")
-# An area present in the full history may have no observations in this interval.
-if chosen_area != "All areas" and chosen_area not in selected.columns:
-    st.info(f"No observations for {chosen_area} in the selected months.")
-    st.stop()
 areas_to_plot = selected.columns if chosen_area == "All areas" else [chosen_area]
 
 # Reshape the numeric series for Seaborn's area grouping. Every series shares

@@ -1,5 +1,3 @@
-"""Shared notebook/app figures with honest coverage and separated month segments."""
-
 import matplotlib.pyplot as plt
 import pandas as pd
 from matplotlib.figure import Figure
@@ -28,8 +26,13 @@ def transfer_lines(data: pd.DataFrame) -> Figure:
     colors = {name: plt.get_cmap("tab10")(i) for i, name in enumerate(connections)}
     if not data.empty:
         data = data.sort_values(["connection", "direction", "start"]).copy()
-        data["month"] = data.start.dt.tz_convert("Europe/Oslo").dt.month
+        data["month"] = (
+            data.start.dt.tz_convert("Europe/Oslo").dt.tz_localize(None).dt.to_period("M")
+        )
         for (connection, direction), group in data.groupby(["connection", "direction"]):
+            color = colors[connection]
+            if len(connections) == 1:
+                color = "tab:blue" if direction == "import" else "tab:orange"
             # A separate segment also stops lines crossing missing source intervals.
             split = (group.start != group.end.shift()) | (
                 group.month != group.month.shift()
@@ -39,13 +42,7 @@ def transfer_lines(data: pd.DataFrame) -> Figure:
                     segment.start.dt.tz_convert("Europe/Oslo"),
                     segment.power_mw,
                     label=f"{connection} {direction}" if i == 0 else None,
-                    color=(
-                        colors[connection]
-                        if len(connections) > 1
-                        else "tab:blue"
-                        if direction == "import"
-                        else "tab:orange"
-                    ),
+                    color=color,
                     linestyle="-" if direction == "import" else "--",
                     linewidth=0.8,
                     marker="." if len(segment) == 1 else None,

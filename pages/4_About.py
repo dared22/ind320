@@ -2,7 +2,7 @@
 
 import streamlit as st
 
-from data import INTERVAL_NOTICE, ReservoirDataError, load_area_metadata
+from data import INTERVAL_NOTICE, load_area_metadata
 
 st.title("About this dashboard")
 st.write(
@@ -19,10 +19,7 @@ st.write(
     "an area appears in a plot only when observations are available."
 )
 # Cache public descriptions across reruns, while showing network failures clearly.
-try:
-    st.dataframe(load_area_metadata(), hide_index=True, width="stretch")
-except ReservoirDataError as exc:
-    st.error(str(exc))
+st.dataframe(load_area_metadata(), hide_index=True, width="stretch")
 st.link_button(
     "NVE API documentation", "https://biapi.nve.no/magasinstatistikk/swagger/index.html"
 )

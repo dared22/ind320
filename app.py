@@ -1,5 +1,3 @@
-"""Register the five Streamlit pages with clear sidebar labels."""
-
 import streamlit as st
 
 st.set_page_config(

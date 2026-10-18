@@ -1,42 +1,36 @@
-"""Publish curated transfers locally; query MongoDB directly from the app."""
-
 from collections.abc import Iterator
 from contextlib import contextmanager
 
 import pandas as pd
 from pymongo import MongoClient, ReplaceOne
-from pymongo.errors import PyMongoError
 
-from config import ConfigurationError, get_setting, require_setting
+from config import get_setting
 from transfers import (
     SOURCE,
     annual_totals,
     clip_intervals,
     month_bounds,
-    validate_intervals,
+    prepare_intervals,
 )
 
 
 @contextmanager
 def mongo_database() -> Iterator:
-    """Keep driver details out of user messages and close the connection reliably."""
-    uri = require_setting("MONGODB_URI")
-    try:
-        with MongoClient(
-            uri, serverSelectionTimeoutMS=10000, connectTimeoutMS=10000, tz_aware=True
-        ) as client:
-            yield client[get_setting("MONGODB_DATABASE", "ind320")]
-    except (PyMongoError, ValueError):
-        raise ConfigurationError(
-            "MongoDB is unavailable. Check secrets, network access, and permissions."
-        ) from None
+    """Open MongoDB with private settings and close the connection after use."""
+    with MongoClient(
+        get_setting("MONGODB_URI"),
+        serverSelectionTimeoutMS=10000,
+        connectTimeoutMS=10000,
+        tz_aware=True,
+    ) as client:
+        yield client[get_setting("MONGODB_DATABASE", "ind320")]
 
 
 def publish(
-    data: pd.DataFrame, report: pd.DataFrame, years: tuple[int, ...] = (2024, 2025)
+    data: pd.DataFrame, years: tuple[int, ...] = (2024, 2025)
 ) -> pd.DataFrame:
     """Upsert intervals and summaries derived exclusively from Cassandra extraction."""
-    data = validate_intervals(data)
+    data = prepare_intervals(data)
     summaries = annual_totals(data, years)
     with mongo_database() as db:
         db.transfer_intervals.create_index([("connection", 1), ("start", 1)])
@@ -80,14 +74,6 @@ def publish(
             )
         if annual_operations:
             db.transfer_annual.bulk_write(annual_operations, ordered=False)
-        coverage_operations = []
-        for row in report.to_dict("records"):
-            key = f"{row['connection']}|{row['year']}|{row['month']}|{row['direction']}"
-            coverage_operations.append(
-                ReplaceOne({"_id": key}, {"_id": key, **row}, upsert=True)
-            )
-        if coverage_operations:
-            db.transfer_coverage.bulk_write(coverage_operations, ordered=False)
     return summaries
 
 
@@ -128,33 +114,9 @@ def query_months(connection: str, year: int, months: list[int]) -> pd.DataFrame:
             if documents:
                 frames.append(
                     clip_intervals(
-                        validate_intervals(
-                            pd.DataFrame(documents)[
-                                [
-                                    "connection",
-                                    "direction",
-                                    "start",
-                                    "end",
-                                    "power_mw",
-                                    "energy_mwh",
-                                ]
-                            ]
-                        ),
+                        prepare_intervals(pd.DataFrame(documents)),
                         start,
                         end,
                     )
                 )
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
-
-
-def query_coverage(connection: str, year: int, months: list[int]) -> pd.DataFrame:
-    """Expose monthly gaps and safe source errors alongside selected observations."""
-    with mongo_database() as db:
-        return pd.DataFrame(
-            list(
-                db.transfer_coverage.find(
-                    {"connection": connection, "year": year, "month": {"$in": months}},
-                    {"_id": 0},
-                )
-            )
-        )

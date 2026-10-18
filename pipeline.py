@@ -1,10 +1,4 @@
-"""Local notebook workflow: Spark → Cassandra → Spark → curated MongoDB.
-
-Only this module imports local processing dependencies; Streamlit never does.
-"""
-
 import os
-import re
 import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -15,27 +9,22 @@ from cassandra.auth import PlainTextAuthProvider
 from cassandra.cluster import Cluster
 from pyspark.sql import SparkSession
 
-from config import ConfigurationError, get_setting
-from database_checks import SPARK_CASSANDRA_PACKAGE
-from transfers import COLUMNS, validate_intervals
+from config import get_setting
+from transfers import COLUMNS, prepare_intervals
+
+SPARK_CASSANDRA_PACKAGE = "com.datastax.spark:spark-cassandra-connector_2.12:3.5.1"
 
 
 @contextmanager
 def local_databases() -> Iterator[tuple[SparkSession, str]]:
     """Open the configured local services and release them even if a cell fails."""
     keyspace = get_setting("CASSANDRA_KEYSPACE", "ind320")
-    if not re.fullmatch(r"[a-z][a-z0-9_]{0,47}", keyspace):
-        raise ConfigurationError(
-            "Use a lowercase CQL identifier for CASSANDRA_KEYSPACE."
-        )
     host = get_setting("CASSANDRA_HOST", "127.0.0.1")
     port = int(get_setting("CASSANDRA_PORT", "9042"))
     username, password = (
         get_setting("CASSANDRA_USERNAME"),
         get_setting("CASSANDRA_PASSWORD"),
     )
-    if bool(username) != bool(password):
-        raise ConfigurationError("Set both Cassandra authentication settings.")
     auth = PlainTextAuthProvider(username, password) if username else None
     if get_setting("JAVA_HOME"):
         os.environ["JAVA_HOME"] = get_setting("JAVA_HOME")
@@ -62,6 +51,8 @@ def local_databases() -> Iterator[tuple[SparkSession, str]]:
             .config("spark.jars.ivy", str(Path(__file__).parent / ".local/ivy"))
             .config("spark.cassandra.connection.host", host)
             .config("spark.cassandra.connection.port", str(port))
+            # Keep notebook writes gentle on a single local Cassandra node.
+            .config("spark.cassandra.output.concurrent.writes", "2")
             .config("spark.sql.session.timeZone", "UTC")
             .config("spark.ui.enabled", "false")
             .config("spark.redaction.regex", "(?i)secret|password|token|username")
@@ -81,7 +72,7 @@ def local_databases() -> Iterator[tuple[SparkSession, str]]:
 
 def write_cassandra(spark: SparkSession, keyspace: str, data: pd.DataFrame) -> None:
     """Upsert stable interval keys with Spark; reruns overwrite the same records."""
-    data = validate_intervals(data)
+    data = prepare_intervals(data)
     if data.empty:
         return
     # UTC epoch milliseconds avoid host-timezone conversion of naive datetimes.
@@ -117,7 +108,7 @@ def write_cassandra(spark: SparkSession, keyspace: str, data: pd.DataFrame) -> N
 def read_cassandra(
     spark: SparkSession, keyspace: str, years: tuple[int, ...] = (2024, 2025)
 ) -> pd.DataFrame:
-    """Extract only relevant fields through Spark, then validate before publishing."""
+    """Extract only relevant fields through Spark, prepare for publication."""
     from pyspark.sql import functions as F
 
     frame = (
@@ -148,4 +139,4 @@ def read_cassandra(
     )
     for col in ("start", "end"):
         result[col] = pd.to_datetime(result.pop(f"{col}_ms"), unit="ms", utc=True)
-    return validate_intervals(result[COLUMNS])
+    return prepare_intervals(result[COLUMNS])

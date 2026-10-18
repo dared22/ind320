@@ -1,6 +1,3 @@
-"""ENTSO-E physical flows: monthly retrieval, UTC intervals, and energy coverage."""
-
-import re
 import xml.etree.ElementTree as ET
 
 import pandas as pd
@@ -8,7 +5,7 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-from config import require_setting
+from config import get_setting
 
 API_URL = "https://web-api.tp.entsoe.eu/api"
 SOURCE = "ENTSO-E Transparency Platform, A11 cross-border physical flows"
@@ -47,10 +44,6 @@ CONNECTIONS = {
 COLUMNS = ["connection", "direction", "start", "end", "power_mw", "energy_mwh"]
 
 
-class TransferError(RuntimeError):
-    """A safe user-facing transfer error without private request details."""
-
-
 def month_bounds(year: int, month: int) -> tuple[pd.Timestamp, pd.Timestamp]:
     """Select Norwegian calendar months, then convert both boundaries to UTC."""
     start = pd.Timestamp(year=year, month=month, day=1, tz="Europe/Oslo")
@@ -59,109 +52,52 @@ def month_bounds(year: int, month: int) -> tuple[pd.Timestamp, pd.Timestamp]:
 
 def parse_flows(xml: str, connection: str, direction: str) -> pd.DataFrame:
     """Expand A01 points or A03 step changes without inventing missing A01 data."""
-    try:
-        root = ET.fromstring(xml)
-        # Ignore namespace versions while keeping the source element names.
-        for element in root.iter():
-            element.tag = element.tag.split("}")[-1]
-        if root.tag == "Acknowledgement_MarketDocument":
-            reason = (root.findtext("Reason/text") or "").lower()
-            if "no matching data" in reason or "no data" in reason:
-                raise TransferError(
-                    "ENTSO-E has no published observations for this request."
-                )
-            raise TransferError("ENTSO-E reports unavailable data or denied access.")
-        rows = []
-        no, foreign = CONNECTIONS[connection]
-        origin, destination = (foreign, no) if direction == "import" else (no, foreign)
-        for series in root.findall("TimeSeries"):
-            if series.findtext("quantity_Measure_Unit.name") != "MAW":
-                raise ValueError("Unexpected power unit")
-            if (
-                series.findtext("out_Domain.mRID") != ZONES[origin]
-                or series.findtext("in_Domain.mRID") != ZONES[destination]
-            ):
-                raise ValueError("Unexpected domains")
-            curve = series.findtext("curveType", "A01")
-            if curve not in ("A01", "A03"):
-                raise ValueError("Unsupported curve")
-            for period in series.findall("Period"):
-                start = pd.Timestamp(period.findtext("timeInterval/start"))
-                end = pd.Timestamp(period.findtext("timeInterval/end"))
-                if start.tzinfo is None or end.tzinfo is None:
-                    raise ValueError("Missing timezone")
-                resolution = period.findtext("resolution")
-                if not re.fullmatch(r"PT(?:\d+H)?(?:\d+M)?(?:\d+S)?", resolution or ""):
-                    raise ValueError("Unsupported resolution")
-                step = pd.Timedelta(resolution)
-                if step <= pd.Timedelta(0) or (end - start) % step:
-                    raise ValueError("Invalid resolution")
-                points = sorted(
-                    (int(p.findtext("position")), float(p.findtext("quantity")))
-                    for p in period.findall("Point")
-                )
-                positions = [p[0] for p in points]
-                if len(set(positions)) != len(positions):
-                    raise ValueError("Duplicate positions")
-                for i, (position, power) in enumerate(points):
-                    left = start + (position - 1) * step
-                    right = (
-                        start + (points[i + 1][0] - 1) * step
-                        if curve == "A03" and i + 1 < len(points)
-                        else end
-                        if curve == "A03"
-                        else left + step
+    root = ET.fromstring(xml)
+    # Ignore namespace versions while keeping the source element names.
+    for element in root.iter():
+        element.tag = element.tag.split("}")[-1]
+    rows = []
+    for series in root.findall("TimeSeries"):
+        curve = series.findtext("curveType", "A01")
+        for period in series.findall("Period"):
+            start = pd.Timestamp(period.findtext("timeInterval/start"))
+            end = pd.Timestamp(period.findtext("timeInterval/end"))
+            step = pd.Timedelta(period.findtext("resolution"))
+            points = sorted(
+                (int(p.findtext("position")), float(p.findtext("quantity")))
+                for p in period.findall("Point")
+            )
+            for i, (position, power) in enumerate(points):
+                left = start + (position - 1) * step
+                right = left + step
+                if curve == "A03":
+                    # Step changes last until the next point or period end.
+                    right = end
+                    if i + 1 < len(points):
+                        right = start + (points[i + 1][0] - 1) * step
+                rows.append(
+                    (
+                        connection,
+                        direction,
+                        left,
+                        right,
+                        power,
+                        power * (right - left).total_seconds() / 3600,
                     )
-                    if position < 1 or left >= end or right > end or power < 0:
-                        raise ValueError("Invalid point")
-                    rows.append(
-                        (
-                            connection,
-                            direction,
-                            left,
-                            right,
-                            power,
-                            power * (right - left).total_seconds() / 3600,
-                        )
-                    )
-        return validate_intervals(pd.DataFrame(rows, columns=COLUMNS))
-    except (ET.ParseError, ValueError, TypeError, KeyError):
-        raise TransferError(
-            "ENTSO-E returned invalid intervals, domains, or units."
-        ) from None
+                )
+    return prepare_intervals(pd.DataFrame(rows, columns=COLUMNS))
 
 
-def validate_intervals(frame: pd.DataFrame) -> pd.DataFrame:
-    """Reject conflicting keys and overlaps; identical repeated points are harmless."""
-    if not set(COLUMNS).issubset(frame.columns):
-        raise TransferError("Transfer records are missing required fields.")
+def prepare_intervals(frame: pd.DataFrame) -> pd.DataFrame:
+    """Select the shared fields, parse UTC dates, and remove identical records."""
     data = frame[COLUMNS].copy()
-    for col in ("start", "end"):
-        data[col] = pd.to_datetime(data[col], utc=True, errors="coerce")
-    if data[["start", "end"]].isna().any().any():
-        raise TransferError("Transfer records contain missing or invalid timestamps.")
-    if data.empty:
-        return data
-    if (
-        not data.direction.isin(["import", "export"]).all()
-        or not data.connection.isin(CONNECTIONS).all()
-        or not data[["power_mw", "energy_mwh"]]
-        .map(lambda x: pd.notna(x) and 0 <= x < float("inf"))
-        .all()
-        .all()
-        or (data.end <= data.start).any()
-    ):
-        raise TransferError("Invalid transfer values or direction.")
-    expected = data.power_mw * (data.end - data.start).dt.total_seconds() / 3600
-    if ((expected - data.energy_mwh).abs() > 1e-6).any():
-        raise TransferError("Transfer energy does not match MW × interval hours.")
-    data = data.drop_duplicates().sort_values(["connection", "direction", "start"])
-    if data.duplicated(["connection", "direction", "start"]).any():
-        raise TransferError("Conflicting transfer intervals share a stable key.")
-    previous = data.groupby(["connection", "direction"]).end.shift()
-    if (data.start < previous).any():
-        raise TransferError("Overlapping transfer intervals would double-count energy.")
-    return data.reset_index(drop=True)
+    for column in ("start", "end"):
+        data[column] = pd.to_datetime(data[column], utc=True)
+    return (
+        data.drop_duplicates()
+        .sort_values(["connection", "direction", "start"])
+        .reset_index(drop=True)
+    )
 
 
 def clip_intervals(
@@ -185,7 +121,7 @@ def fetch_month(
     month: int,
     token: str,
 ) -> pd.DataFrame:
-    """Request one month; exceptions never include the token-bearing URL."""
+    """Request one month without printing URLs that contain the API token."""
     start, end = month_bounds(year, month)
     no, foreign = CONNECTIONS[connection]
     origin, destination = (foreign, no) if direction == "import" else (no, foreign)
@@ -202,18 +138,16 @@ def fetch_month(
             },
             timeout=(10, 60),
         )
-        if response.status_code in (401, 403):
-            raise TransferError(
-                "ENTSO-E denied API access; check the token and permissions."
-            )
-        if response.status_code == 400:
-            # Acknowledgements describe unavailable data without exposing URLs.
-            parse_flows(response.text, connection, direction)
-        response.raise_for_status()
     except requests.RequestException:
-        raise TransferError(
-            "ENTSO-E request failed; check access, token, and availability."
-        ) from None
+        # Request exceptions can contain the API token in their URL.
+        print("ENTSO-E request failed. Check the connection and API token.")
+        return prepare_intervals(pd.DataFrame(columns=COLUMNS))
+    if response.status_code == 400:
+        # No-data responses use HTTP 400; the XML contains no observations.
+        return parse_flows(response.text, connection, direction)
+    if not response.ok:
+        print(f"ENTSO-E request returned HTTP {response.status_code}.")
+        return prepare_intervals(pd.DataFrame(columns=COLUMNS))
     return clip_intervals(parse_flows(response.text, connection, direction), start, end)
 
 
@@ -221,7 +155,7 @@ def ingest(
     years: tuple[int, ...] = (2024, 2025), connections: tuple[str, ...] | None = None
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Download monthly chunks and report every gap, without substituting zeros."""
-    token = require_setting("ENTSOE_API_TOKEN")
+    token = get_setting("ENTSOE_API_TOKEN")
     frames, reports = [], []
     retry = Retry(total=2, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504])
     with requests.Session() as session:
@@ -231,17 +165,12 @@ def ingest(
                 for direction in ("import", "export"):
                     for month in range(1, 13):
                         start, end = month_bounds(year, month)
-                        message = ""
-                        try:
-                            data = fetch_month(
-                                session, connection, direction, year, month, token
-                            )
-                            frames.append(data)
-                            hours = (
-                                data.end - data.start
-                            ).dt.total_seconds().sum() / 3600
-                        except TransferError as exc:
-                            hours, message = 0, str(exc)
+                        data = fetch_month(
+                            session, connection, direction, year, month, token
+                        )
+                        frames.append(data)
+                        hours = (data.end - data.start).dt.total_seconds().sum() / 3600
+                        message = "No observations returned." if data.empty else ""
                         expected = (end - start).total_seconds() / 3600
                         reports.append(
                             {
@@ -265,7 +194,7 @@ def ingest(
         if frames
         else pd.DataFrame(columns=COLUMNS)
     )
-    return validate_intervals(result), pd.DataFrame(reports)
+    return prepare_intervals(result), pd.DataFrame(reports)
 
 
 def annual_totals(

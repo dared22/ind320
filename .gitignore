@@ -49,4 +49,3 @@ coverage/
 
 
 *.md
-.streamlit/secrets.example.toml

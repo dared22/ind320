@@ -5,7 +5,12 @@ import calendar
 import matplotlib.pyplot as plt
 import streamlit as st
 
-from pymongo.errors import PyMongoError
+from pymongo.errors import (
+    ConfigurationError,
+    ConnectionFailure,
+    OperationFailure,
+    PyMongoError,
+)
 from ind320.storage.mongo_store import available_transfers, query_annual, query_months
 from ind320.ui.transfer_charts import energy_pie, transfer_lines
 
@@ -64,9 +69,29 @@ try:
                     st.caption(
                         f"{len(data):,} observed intervals. Gaps and omitted months are not connected."
                     )
-except (PyMongoError, ValueError):
-    # Show a short message rather than database connection details.
-    st.error("Could not read MongoDB. Check your connection and private settings.")
+except (PyMongoError, ValueError) as error:
+    # Distinguish connection failures without exposing the URI or driver message.
+    # Driver messages can include private hostnames and connection details.
+    if isinstance(error, OperationFailure) and error.code == 18:
+        detail = "MongoDB authentication failed. Check the database user's credentials."
+    elif isinstance(error, OperationFailure) and error.code == 13:
+        detail = "MongoDB denied access. Check the database user's read permissions."
+    elif isinstance(error, ConnectionFailure):
+        detail = (
+            "MongoDB network connection failed. Check Atlas Network Access for "
+            "the Streamlit Cloud connection, and check DNS/TLS connectivity."
+        )
+    elif isinstance(error, ConfigurationError):
+        detail = "MongoDB connection configuration failed. Check the URI and DNS settings."
+    elif isinstance(error, ValueError):
+        detail = "Check the MongoDB settings and the format of the published transfer data."
+    else:
+        detail = "The MongoDB read failed. Check the database service and user permissions."
+    st.error(f"Could not read MongoDB. {detail}")
+    # Only show the exception class and numeric code, never the raw exception.
+    code = getattr(error, "code", None)
+    code_label = f", code {code}" if isinstance(code, int) else ""
+    st.caption(f"Error type: {type(error).__name__}{code_label}")
 # Keep the required source explanation visible even when credentials are missing.
 with st.expander("Sources, coverage, and processing"):
     st.write(

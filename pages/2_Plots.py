@@ -5,34 +5,16 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import streamlit as st
 
-from data import INTERVAL_NOTICE, ReservoirDataError, load_reservoir_data
-
+from reservoir_controls import reservoir_selection
 
 st.title("Reservoir filling over time")
 st.write("Select one area or compare all available areas on the same percentage scale.")
 
-try:
-    _, fill_levels = load_reservoir_data()
-except ReservoirDataError as exc:
-    st.error(str(exc))
-    st.stop()
-months = fill_levels.index.to_period("M").unique().astype(str).tolist()
-
-# The first month is the default for both ends of the selection range.
-chosen_area = st.selectbox("Area series", ["All areas", *fill_levels.columns])
-start_month, end_month = st.select_slider(
-    "Months",
-    options=months,
-    value=(months[0], months[0]),
-)
-
-# Selection enters the shared retrieval interface; upstream history is cached.
-try:
-    _, selected = load_reservoir_data(start_month, end_month)
-except ReservoirDataError as exc:
-    st.error(str(exc))
-    st.stop()
-st.caption(INTERVAL_NOTICE)
+# The table and this plot use the same inclusive interval and area-type controls.
+_, selected = reservoir_selection()
+chosen_area = st.selectbox("Area series", ["All areas", *selected.columns])
+start_month = selected.index.min().strftime("%Y-%m")
+end_month = selected.index.max().strftime("%Y-%m")
 # An area present in the full history may have no observations in this interval.
 if chosen_area != "All areas" and chosen_area not in selected.columns:
     st.info(f"No observations for {chosen_area} in the selected months.")

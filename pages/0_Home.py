@@ -4,12 +4,11 @@ import streamlit as st
 
 from data import ReservoirDataError, load_reservoir_data
 
-
 st.title("Norwegian reservoir filling")
-st.caption("IND320 · Project work, part 2 · Reservoir API")
+st.caption("IND320 · Project work, part 2 · Reservoirs and cross-border transfers")
 st.write(
     "Explore the available weekly reservoir area series from the NVE API. Use the sidebar to open the data table, interactive plot, or "
-    "information page."
+    "Transfers or information page. Transfers show ENTSO-E physical flows for 2024–2025, published from Spark/Cassandra to MongoDB."
 )
 
 # The summary uses the same cached data as the table and plot pages.
@@ -31,3 +30,7 @@ st.page_link(
     "pages/1_Data.py", label="View first-month trends and source data", icon="📋"
 )
 st.page_link("pages/2_Plots.py", label="Choose areas and months to plot", icon="📈")
+
+st.page_link(
+    "pages/3_Transfers.py", label="Explore import and export energy", icon="⚡"
+)

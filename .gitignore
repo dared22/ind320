@@ -46,3 +46,7 @@ yarn-error.log*
 build/
 dist/
 coverage/
+
+
+*.md
+.streamlit/secrets.example.toml

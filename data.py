@@ -182,11 +182,19 @@ def select_reservoir_data(
         raise ReservoirDataError(
             "No reservoir observations match the selected months and area type."
         )
-    levels = selected.pivot(
-        index="Observation Date",
-        columns=["Area Type", "Area Code"],
-        values="Fill Level",
-    ).sort_index()
+    levels = (
+        selected.pivot(
+            index="Observation Date",
+            columns=["Area Type", "Area Code"],
+            values="Fill Level",
+        )
+        .sort_index()
+        .dropna(axis=1, how="all")
+    )
+    if levels.empty:
+        raise ReservoirDataError(
+            "No fill-level readings are available in this selection."
+        )
     # Preserve the original national-first display, then observed EL/VASS codes.
     order = sorted(levels.columns, key=lambda key: (key[0] != "NO", key[0], key[1]))
     levels = levels.loc[:, order] * 100

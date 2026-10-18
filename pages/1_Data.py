@@ -1,57 +1,34 @@
-"""Show a row-wise sparkline table and the imported reservoir records."""
+"""Keep source rows and sparklines synchronized with the selected months/type."""
 
 import pandas as pd
 import streamlit as st
 
-from data import ReservoirDataError, load_reservoir_data, unusual_fill_levels
-
+from data import unusual_fill_levels
+from reservoir_controls import reservoir_selection
 
 st.title("Data table")
-try:
-    source, fill_levels = load_reservoir_data()
-except ReservoirDataError as exc:
-    st.error(str(exc))
-    st.stop()
-
-# Use the earliest observed month; newer series may have no readings then.
-first_month = fill_levels.index.min().to_period("M")
-first_month_levels = fill_levels.loc[fill_levels.index.to_period("M") == first_month]
-
-st.write(
-    "Each row below represents one numeric fill-level series imported from "
-    "NVE. The line shows every weekly observation in the first month."
-)
+source, levels = reservoir_selection()
+# Each sparkline uses every available observation in the chosen interval.
 summary = pd.DataFrame(
     {
-        "Area": fill_levels.columns,
-        "First month trend": [
-            first_month_levels[area].dropna().tolist() for area in fill_levels.columns
-        ],
-        "First reading (%)": first_month_levels.iloc[0].round(1).to_numpy(),
-        "Latest reading (%)": fill_levels.iloc[-1].round(1).to_numpy(),
+        "Area": levels.columns,
+        "Selected interval trend": [levels[c].dropna().tolist() for c in levels],
+        "First reading (%)": [levels[c].dropna().iloc[0] for c in levels],
+        "Latest reading (%)": [levels[c].dropna().iloc[-1] for c in levels],
     }
 )
-st.caption(f"First available month: {first_month.strftime('%B %Y')}")
 st.dataframe(
     summary,
     column_config={
-        "First month trend": st.column_config.LineChartColumn("First month trend (%)")
+        "Selected interval trend": st.column_config.LineChartColumn("Fill level (%)")
     },
     hide_index=True,
     width="stretch",
 )
-
 st.subheader("NVE API records")
-st.caption(
-    f"The {len(source):,} API records, sorted by date and shown with English headers."
-)
 st.dataframe(source, hide_index=True, height=360, width="stretch")
-
-# Keep unusual source readings visible rather than clipping chart values.
 unusual = unusual_fill_levels(source)
 if not unusual.empty:
-    st.warning(
-        f"{len(unusual)} fill-level readings lie outside 0–100%; values are preserved."
-    )
+    st.warning(f"{len(unusual)} readings outside 0–100%; original values preserved.")
     with st.expander("Inspect unusual readings"):
         st.dataframe(unusual, hide_index=True)

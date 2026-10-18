@@ -1,7 +1,7 @@
 """Small real-service checks for the local notebook environment.
 
 These checks touch only a uniquely identified temporary row/document. They do
-not ingest transfers or publish project data (those belong to later plan parts).
+not ingest transfers or publish project data; the notebook handles those steps.
 """
 
 import os

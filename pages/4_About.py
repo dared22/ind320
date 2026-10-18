@@ -8,8 +8,8 @@ st.title("About this dashboard")
 st.write(
     "The IND320 dashboard retrieves weekly reservoir history from NVE. "
     "The notebook and app share data preparation and numeric percentage series. "
-    "Local Spark/Cassandra and MongoDB checks prepare the database environment "
-    "for the later transfer-data pipeline."
+    "ENTSO-E physical flows pass through local Spark → Cassandra → Spark, "
+    "then publish curated intervals and annual energy summaries to MongoDB. The Transfers page queries MongoDB directly; app reruns never ingest data."
 )
 st.caption(INTERVAL_NOTICE)
 st.subheader("Area labels from NVE")

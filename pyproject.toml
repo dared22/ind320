@@ -11,6 +11,10 @@ dependencies = [
     "requests==2.32.5",
     "pymongo==4.15.3",
     "python-dotenv==1.2.1",
+    "scipy>=1.15.3",
+    "scikit-learn>=1.7.2",
+    "statsmodels>=0.15.0",
+    "numpy>=2.2.6",
 ]
 
 [dependency-groups]
@@ -20,6 +24,9 @@ notebook = [
     "jupyter>=1.1.1",
     "pyspark==3.5.1",
     "cassandra-driver==3.29.2",
+    "geopandas>=1.1.4",
+    "nbconvert>=7.17.1",
+    "pypandoc-binary>=1.17",
 ]
 
 [tool.uv]

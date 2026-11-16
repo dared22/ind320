@@ -12,6 +12,7 @@ from unittest.mock import Mock, patch
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import requests
 from streamlit.testing.v1 import AppTest
 
 from ind320.analysis.weather import precipitation_analysis
@@ -31,6 +32,15 @@ def sampled_points():
 
 def weather_response(_url, *, params, timeout):
     """Represent the API's multi-location response, including request-order IDs."""
+    # Match the upstream prepareCoordinates validation: an explicit elevation
+    # list must have one entry per coordinate; a single nan is not broadcast.
+    if len(params['elevation'].split(',')) != len(params['latitude'].split(',')):
+        response = Mock(status_code=400)
+        response.json.return_value = {
+            'error': True, 'reason': 'Coordinates and elevation count must be the same.'
+        }
+        response.raise_for_status.side_effect = requests.HTTPError('400 Bad Request', response=response)
+        return response
     times = pd.date_range(params["start_date"], pd.Timestamp(params["end_date"]) + pd.Timedelta(hours=23), freq="h")
     records = []
     for i, (lat, lon) in enumerate(zip(params["latitude"].split(','), params["longitude"].split(','))):
@@ -63,7 +73,7 @@ class WeatherSamplingTests(unittest.TestCase):
             self.assertEqual(result.attrs['grid_cells'], 2)
             self.assertEqual(get.call_count, 1)
             self.assertEqual(get.call_args.kwargs['params']['cell_selection'], 'nearest')
-            self.assertEqual(get.call_args.kwargs['params']['elevation'], 'nan')
+            self.assertEqual(get.call_args.kwargs['params']['elevation'].split(','), ['nan', 'nan'])
             cached = fetch_weather('NO3', '2024-02-29', '2024-02-29', cache_dir=Path(cache))
             pd.testing.assert_frame_equal(cached, result)
             self.assertEqual(get.call_count, 1)
@@ -86,6 +96,35 @@ class WeatherSamplingTests(unittest.TestCase):
         ), patch('ind320.data.weather.requests.get', side_effect=incomplete):
             with self.assertRaisesRegex(ValueError, 'complete, finite hourly timeline'):
                 fetch_weather('NO3', '2024-01-01', '2024-01-01', cache_dir=Path(cache))
+
+    def test_api_error_explanation_is_preserved(self):
+        response = Mock(status_code=400)
+        response.json.return_value = {'error': True, 'reason': 'Invalid coordinate parameter.'}
+        response.raise_for_status.side_effect = requests.HTTPError('400 Bad Request', response=response)
+        with tempfile.TemporaryDirectory() as cache, patch(
+            'ind320.data.weather.load_weather_coordinates', return_value=sampled_points()
+        ), patch('ind320.data.weather.requests.get', return_value=response):
+            with self.assertRaisesRegex(requests.HTTPError, 'Open-Meteo HTTP 400: Invalid coordinate parameter'):
+                fetch_weather('NO3', '2024-01-01', '2024-01-01', cache_dir=Path(cache))
+
+    def test_twenty_location_batch_has_twenty_disabled_elevations(self):
+        # Reproduce the deployed request shape: 20 cells, with 50 sampled
+        # locations in each cell so the area still represents all 1,000 points.
+        points = pd.DataFrame([
+            {'area': 'NO3', 'latitude': 60 + .25 * (i // 5),
+             'longitude': 4.5 + .25 * (i % 5)}
+            for i in range(20) for _ in range(50)
+        ]).set_index('area')
+        with tempfile.TemporaryDirectory() as cache, patch(
+            'ind320.data.weather.load_weather_coordinates', return_value=points
+        ), patch('ind320.data.weather.requests.get', side_effect=weather_response) as get:
+            result = fetch_weather('NO3', '2025-01-01', '2025-01-01', cache_dir=Path(cache))
+            self.assertEqual(get.call_count, 1)
+            params = get.call_args.kwargs['params']
+            self.assertEqual(len(params['latitude'].split(',')), 20)
+            self.assertEqual(len(params['longitude'].split(',')), 20)
+            self.assertEqual(params['elevation'].split(','), ['nan'] * 20)
+            self.assertEqual(result.attrs['sampled_points'], 1000)
 
     def test_failed_batch_resumes_cached_cells(self):
         with tempfile.TemporaryDirectory() as cache, patch(

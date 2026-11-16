@@ -103,11 +103,28 @@ def fetch_weather(
                 "start_date": start.strftime("%Y-%m-%d"),
                 "end_date": end.strftime("%Y-%m-%d"),
                 "hourly": ",".join(WEATHER_COLUMNS), "models": "era5",
-                "timezone": "UTC", "cell_selection": "nearest", "elevation": "nan",
+                "timezone": "UTC", "cell_selection": "nearest",
+                # Unlike timezone, elevation is not broadcast across locations.
+                # Supply one nan per cell to disable downscaling for the batch.
+                "elevation": ",".join("nan" for _ in batch),
             },
             timeout=(10, 120),
         )
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as error:
+            # Open-Meteo explains invalid parameters/rate limits in JSON. Keep
+            # that explanation in the UI instead of only showing a long URL.
+            try:
+                reason = response.json().get("reason")
+            except (ValueError, AttributeError):
+                reason = None
+            if isinstance(reason, str) and reason:
+                raise requests.HTTPError(
+                    f"Open-Meteo HTTP {response.status_code}: {reason}",
+                    response=response,
+                ) from error
+            raise
         payload = response.json()
         records = payload if isinstance(payload, list) else [payload]
         if len(records) != len(batch):

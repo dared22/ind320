@@ -1,4 +1,4 @@
-"""Notebook-only GIS preparation; the app reads the resulting coordinate CSV."""
+"""Notebook-only GIS preparation; the app reads all sampled points from JSON."""
 
 import geopandas as gpd
 import numpy as np

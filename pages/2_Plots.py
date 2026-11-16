@@ -12,10 +12,9 @@ st.write("Select one area or compare all available areas on the same percentage 
 
 # The table and this plot use the same inclusive interval and area-type controls.
 _, selected = reservoir_selection()
-chosen_area = st.selectbox("Area series", ["All areas", *selected.columns])
 start_month = selected.index.min().strftime("%Y-%m")
 end_month = selected.index.max().strftime("%Y-%m")
-areas_to_plot = selected.columns if chosen_area == "All areas" else [chosen_area]
+areas_to_plot = selected.columns
 
 # Reshape the numeric series for Seaborn's area grouping. Every series shares
 # a percentage unit, so the original values can be compared on one axis.
@@ -46,7 +45,7 @@ ax.set_ylabel("Reservoir filling (%)")
 ax.grid(alpha=0.25)
 ax.xaxis.set_major_locator(mdates.AutoDateLocator())
 ax.xaxis.set_major_formatter(mdates.ConciseDateFormatter(ax.xaxis.get_major_locator()))
-ax.legend(title="Area", ncol=3 if chosen_area == "All areas" else 1)
+ax.legend(title="Area", ncol=3 if len(areas_to_plot) > 1 else 1)
 fig.tight_layout()
 st.pyplot(fig, width="stretch")
 plt.close(fig)

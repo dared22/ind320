@@ -6,11 +6,12 @@ import streamlit as st
 
 from ind320.analysis.reservoirs import filling_spectrogram, stl_analysis, weekly_filling
 from ind320.data.reservoirs import fetch_reservoir_history
+from ind320.ui.area_controls import area_selection
 
 st.title("Reservoir analysis")
 st.write("Explore seasonal patterns and changing frequencies using the full weekly history.")
 
-# This page owns its area control; the date controls on other pages do not apply.
+# Share the area with weather/table/plots; analyses still use the full history.
 try:
     source = fetch_reservoir_history()
 except requests.RequestException:
@@ -18,11 +19,7 @@ except requests.RequestException:
     st.stop()
 areas = list(source[["Area Type", "Area Code"]].drop_duplicates().itertuples(index=False, name=None))
 areas.sort(key=lambda key: (key[0] != "EL", key[0], key[1]))
-area_type, area_code = st.selectbox(
-    "Reservoir area", areas, index=areas.index(("EL", 3)),
-    format_func=lambda key: f"NO{key[1]} (electricity area)" if key[0] == "EL" else f"{key[0]} {key[1]}",
-    key="analysis_reservoir_area",
-)
+area_type, area_code = area_selection("analysis_reservoir_area", areas)
 try:
     weekly = weekly_filling(source, area_type, area_code)
 except ValueError as error:

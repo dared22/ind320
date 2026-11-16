@@ -1,4 +1,4 @@
-"""Inspect one point's daily ERA5 weather with shared notebook analyses."""
+"""Inspect sampled-area daily ERA5 averages with shared notebook analyses."""
 
 from datetime import date
 
@@ -9,6 +9,7 @@ import streamlit as st
 
 from ind320.analysis.weather import precipitation_analysis, temperature_analysis
 from ind320.data.weather import daily_weather, fetch_weather, load_weather_coordinates
+from ind320.ui.area_controls import WEATHER_AREAS, area_selection
 
 
 @st.cache_data(ttl=86400, show_spinner="Downloading hourly ERA5 weather...")
@@ -19,26 +20,32 @@ def weather_for_year(area: str, year: int) -> pd.DataFrame:
 
 st.title("Weather quality")
 st.write(
-    "Each series represents one reproducibly sampled point, not an area average. "
+    "Each series averages weather over 1,000 reproducibly sampled locations in the selected area. "
     "East combines NVE regions RS and RØ, West uses RV, and North combines RM and RN. "
     "These administrative polygons approximate precipitation areas; they are not exact catchment or VASS boundaries."
 )
 coordinates = load_weather_coordinates()
 left, right = st.columns(2)
-area = left.selectbox("Weather area", list(coordinates.index), index=2, key="weather_area")
+with left:
+    selected = area_selection("weather_area", [*WEATHER_AREAS, ("NO", 0)])
+if selected not in WEATHER_AREAS:
+    st.info("Weather sampling covers NO1–NO5 and the three grouped NVE regions. Select one of those areas to analyse weather; the national reservoir selection is retained across pages.")
+    st.stop()
+area = WEATHER_AREAS[selected]
 # Complete historical calendar years avoid silently plotting a partial current year.
 year = right.selectbox("Weather year", list(range(date.today().year - 1, 1939, -1)),
                        index=date.today().year - 1 - 2024, key="weather_year")
-point = coordinates.loc[area]
-st.caption(f"Chosen point: {point.latitude:.5f}° N, {point.longitude:.5f}° E. Model: ERA5. Dates: UTC.")
+st.caption(f"{len(coordinates.loc[[area]]):,} sampled locations. Model: ERA5. Dates: UTC.")
 try:
     hourly = weather_for_year(area, year)
     daily = daily_weather(hourly)
 except (requests.RequestException, ValueError) as error:
     st.error(f"Weather could not be loaded: {error}")
+    st.info("Completed grid cells are cached. If the API is rate-limited, wait before retrying; partial area averages are never shown.")
     st.stop()
 st.caption(
-    f"{len(hourly):,} hourly values averaged into {len(daily)} daily values. "
+    f"{hourly.attrs['sampled_points']:,} sampled points represented by {hourly.attrs['grid_cells']:,} ERA5 cells. "
+    f"{len(hourly):,} hourly area averages reduced to {len(daily)} daily values. "
     "Precipitation is the average hourly amount in mm, not a daily rainfall total. "
     "Source: Open-Meteo Historical Weather API / Copernicus ERA5 reanalysis (CC BY 4.0)."
 )

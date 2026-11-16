@@ -47,18 +47,14 @@ def precipitation_analysis(
     )
     summary = {"days": len(data), "outliers": int(outlier.sum()),
                "center": center, "sigma": sigma, "scale_method": scale_method}
-    fig, axes = plt.subplots(2, 1, figsize=(10, 6), sharex=True)
-    axes[0].plot(data.index, values, label="Daily average hourly amount")
-    axes[0].plot(data.index, baseline, label="Removed low-frequency component", alpha=0.7)
-    axes[0].fill_between(data.index, data.lower, data.upper, alpha=0.15, label="SPC limits")
-    axes[0].scatter(data.index[outlier], values[outlier], color="firebrick", marker="x", label="Flagged day")
-    axes[0].set(ylabel="Average hourly amount (mm)", title="Precipitation: DCT and robust SPC")
-    axes[0].legend(fontsize="small")
-    axes[1].plot(data.index, filtered, label="DCT high-pass precipitation")
-    axes[1].axhline(lower, color="firebrick", linestyle="--")
-    axes[1].axhline(upper, color="firebrick", linestyle="--", label="Residual limits")
-    axes[1].set(xlabel="UTC date", ylabel="Filtered amount (mm)")
-    axes[1].legend(fontsize="small")
+    # Filtering is only used for the limits and flags. Display the original
+    # observations with the limits translated back onto their rainfall scale.
+    fig, ax = plt.subplots(figsize=(10, 4))
+    ax.plot(data.index, values, label="Daily average hourly amount")
+    ax.fill_between(data.index, data.lower, data.upper, alpha=0.15, label="SPC limits")
+    ax.scatter(data.index[outlier], values[outlier], color="firebrick", marker="x", label="Flagged day")
+    ax.set(xlabel="UTC date", ylabel="Average hourly amount (mm)", title="Precipitation: DCT and robust SPC")
+    ax.legend(fontsize="small")
     fig.tight_layout()
     return data, summary, fig
 

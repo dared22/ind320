@@ -15,6 +15,7 @@ from ind320.data.reservoirs import fetch_reservoir_history
 from ind320.data.weather import daily_weather
 from ind320.data.weeks import reservoir_weeks, rolling_weather_correlation, weekly_weather
 from ind320.ui.area_controls import AREAS, WEATHER_AREAS, area_selection
+from ind320.ui.palette import GREEN, INK, PLOT_BAND, SEQUENTIAL_COLORS, WARM_ACCENT
 from ind320.ui.source_cache import weather_for_year
 from ind320.ui.transfers import render_transfers
 
@@ -48,8 +49,9 @@ def _reservoir_quality(area: tuple[str, int]) -> None:
         spectrum, summary, _ = filling_spectrogram(weekly, window, overlap, plot=False)
         power = 10 * np.log10(np.maximum(spectrum.to_numpy(), 1e-12))
         chart = go.Figure(go.Heatmap(z=power, x=spectrum.columns, y=spectrum.index.to_numpy(),
+                                       colorscale=SEQUENTIAL_COLORS,
                                        colorbar={"title": "PSD (dB)"}))
-        chart.add_hline(y=1 / 52, line_dash="dash")
+        chart.add_hline(y=1 / 52, line_dash="dash", line_color=WARM_ACCENT)
         chart.update_layout(xaxis_title="Window center", yaxis_title="Cycles per week")
         st.plotly_chart(chart)
         st.caption(f"{summary['windows']} windows. Frequency resolution: "
@@ -63,11 +65,11 @@ def _quality_chart(data: pd.DataFrame, label: str) -> go.Figure:
     if "lower" in data:
         chart.add_scatter(x=data.index, y=data.lower, line={"width": 0}, showlegend=False)
         chart.add_scatter(x=data.index, y=data.upper, line={"width": 0},
-                          fill="tonexty", fillcolor="rgba(121,189,255,0.18)", name="SPC limits")
-    chart.add_scatter(x=data.index, y=data.observed, name="Observed")
+                          fill="tonexty", fillcolor=PLOT_BAND, name="SPC limits")
+    chart.add_scatter(x=data.index, y=data.observed, line={"color": GREEN}, name="Observed")
     flags = data.loc[data.outlier]
     chart.add_scatter(x=flags.index, y=flags.observed, mode="markers",
-                      marker={"symbol": "x", "color": "#ffbd79"}, name="Flagged")
+                      marker={"symbol": "x", "color": WARM_ACCENT}, name="Flagged")
     chart.update_layout(xaxis_title="Date (UTC)", yaxis_title=label)
     return chart
 
@@ -112,7 +114,7 @@ def _correlation(area: tuple[str, int], hourly: pd.DataFrame) -> None:
         st.info("No complete rolling windows for the selected dates, lead and window length.")
         return
     chart = px.line(x=correlation.index, y=correlation, labels={"x": "Week ending", "y": "Pearson r"})
-    chart.add_hline(y=0)
+    chart.add_hline(y=0, line_color=INK)
     chart.update_yaxes(range=[-1, 1])
     st.plotly_chart(chart)
     aggregation = "weekly total (mm)" if feature == "precipitation" else "weekly mean (°C)"

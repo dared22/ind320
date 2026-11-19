@@ -1,7 +1,15 @@
 [theme]
-base = "dark"
-primaryColor = "#79bdff"
-backgroundColor = "#0d1928"
-secondaryBackgroundColor = "#15273b"
-textColor = "#edf5ff"
-chartCategoricalColors = ["#79bdff", "#ffbd79", "#83d6c2", "#d5aaff", "#f48fa3"]
+base = "light"
+primaryColor = "#2A7C13"
+backgroundColor = "#FFF8CF"
+secondaryBackgroundColor = "#FBE6C2"
+textColor = "#263B20"
+linkColor = "#245F18"
+borderColor = "#938451"
+showWidgetBorder = true
+showSidebarBorder = true
+chartCategoricalColors = ["#2A7C13", "#924626", "#52662B", "#276B56", "#73542C"]
+chartSequentialColors = [
+    "#FFF8CF", "#FDF0C9", "#FBE6C2", "#C5D89A", "#A2CF7A",
+    "#76C457", "#58A744", "#3B8A28", "#2A7C13", "#263B20",
+]

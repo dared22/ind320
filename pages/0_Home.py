@@ -14,6 +14,7 @@ from ind320.data.reservoirs import (
 )
 from ind320.data.weeks import WEEK, cutoff_time, reservoir_weeks
 from ind320.ui.area_controls import AREAS, SAVED_AREA, WEATHER_AREAS, area_label, area_selection
+from ind320.ui.palette import CREAM, GREEN, INK, SEQUENTIAL_COLORS, WARM_ACCENT
 from ind320.ui.source_cache import weather_weeks
 from ind320.ui.time_controls import timeframe
 
@@ -112,7 +113,9 @@ for feature in geodata["features"]:
 # Use fixed scales so colors remain comparable between dates.
 lower, upper = {"Fill level": (0, 100), "Mean temperature": (-20, 25),
                 "Total precipitation": (0, 100)}[metric]
-palette = px.colors.sample_colorscale("Blues", [0.25 + i / 12 for i in range(9)], colortype="tuple")
+palette = px.colors.sample_colorscale(list(SEQUENTIAL_COLORS), 9, colortype="tuple")
+regular_outline = [*px.colors.hex_to_rgb(GREEN), 180]
+selected_outline = [*px.colors.hex_to_rgb(WARM_ACCENT), 255]
 snapshot_week = latest if metric == "Fill level" else weather_week
 for feature in geodata["features"]:
     properties = feature["properties"]
@@ -122,9 +125,9 @@ for feature in geodata["features"]:
         index = round(8 * min(1, max(0, (value - lower) / (upper - lower))))
         color = [round(channel * 255) for channel in palette[index]] + [175]
     else:
-        color = [118, 138, 164, 55]
+        color = [137, 132, 113, 65]
     properties.update(
-        fill=color, outline=[255, 203, 126, 255] if key == area else [173, 211, 241, 200],
+        fill=color, outline=selected_outline if key == area else regular_outline,
         thickness=1.25 if key == area else 0.5, label=area_label(key),
         value=f"{metric} {value:.1f} {unit}" if pd.notna(value) else "No value for this week",
         period=str(snapshot_week.date()) if pd.notna(snapshot_week) else "No week in range",
@@ -137,7 +140,8 @@ layer = pdk.Layer("GeoJsonLayer", geodata, id="regions", pickable=True,
                   line_width_max_pixels=1.25)
 deck = pdk.Deck(layer, map_style=None,
                 initial_view_state=pdk.ViewState(latitude=64.8, longitude=13.6, zoom=3.9),
-                tooltip={"html": "{properties.label}<br>{properties.value}<br>Week ending {properties.period}"})
+                tooltip={"html": "{properties.label}<br>{properties.value}<br>Week ending {properties.period}",
+                         "style": {"backgroundColor": CREAM, "color": INK}})
 st.pydeck_chart(deck, key="reservoir_map", on_select=_select_polygon, height=550)
 st.caption(f"{metric} · scale {lower:g} to {upper:g} {unit} · grey indicates missing coverage. "
            f"Selected area · {area_label(area)}.")
@@ -157,6 +161,7 @@ else:
         Filling=rows["Fill Level"] * 100,
     ).sort_values("week")
     fig = px.line(trend, x="week", y="Filling", color="Area",
+                  line_dash="Area" if compare else None,
                   labels={"week": "Week ending", "Filling": "Reservoir filling (%)"})
     st.plotly_chart(fig)
     if not unusual_fill_levels(rows).empty:

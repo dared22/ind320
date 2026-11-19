@@ -3,11 +3,13 @@
 import pandas as pd
 import plotly.graph_objects as go
 
+from ind320.ui.palette import GREEN, PLOT_BAND, WARM_ACCENT
+
 
 def forecast_chart(observed: pd.Series, forecast: pd.DataFrame) -> go.Figure:
     """Reveal the median and shaded interval one week at a time."""
     fig = go.Figure(go.Scatter(x=observed.index, y=observed, name="Observed",
-                               line={"color": "#79bdff"}))
+                               line={"color": GREEN}))
 
     def traces(data: pd.DataFrame) -> list[go.Scatter]:
         dates = [observed.index[-1], *data.index]
@@ -16,10 +18,10 @@ def forecast_chart(observed: pd.Series, forecast: pd.DataFrame) -> go.Figure:
             go.Scatter(x=dates, y=[anchor, *data.lower], line={"width": 0},
                        showlegend=False, hoverinfo="skip"),
             go.Scatter(x=dates, y=[anchor, *data.upper], line={"width": 0},
-                       fill="tonexty", fillcolor="rgba(255,189,121,0.25)",
+                       fill="tonexty", fillcolor=PLOT_BAND,
                        name="Nominal 80% interval", hoverinfo="skip"),
             go.Scatter(x=dates, y=[anchor, *data["median"]], name="Median forecast",
-                       line={"color": "#ffbd79"}),
+                       line={"color": WARM_ACCENT, "dash": "dash"}),
         ]
 
     # Show the full answer on load, with Play to replay starting at the first week.

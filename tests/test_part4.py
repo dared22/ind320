@@ -109,9 +109,12 @@ class ForecastTests(unittest.TestCase):
             app = AppTest.from_file(str(ROOT / "app.py")).run()
             chart = app.get("deck_gl_json_chart")[0].proto
             layer = json.loads(chart.json)["layers"][0]
+            self.assertEqual(layer["lineWidthUnits"], "pixels")
+            self.assertEqual(layer["lineWidthMaxPixels"], 1.25)
             feature = layer["data"]["features"][0]
             properties = feature["properties"]
             self.assertEqual((properties["area_type"], properties["area_code"]), ("EL", 1))
+            self.assertEqual(properties["thickness"], 0.5)
             states = WidgetStates()
             states.widgets.add(id=chart.id, string_value=json.dumps({
                 "selection": {"indices": {"regions": [0]}, "objects": {"regions": [feature]}},
@@ -122,7 +125,13 @@ class ForecastTests(unittest.TestCase):
             self.assertEqual(app.selectbox(key="overview_area").value, ("EL", 1))
             current = app.get("deck_gl_json_chart")[0].proto
             selected = json.loads(current.json)["layers"][0]["data"]["features"][0]
-            self.assertEqual(selected["properties"]["thickness"], 3)
+            self.assertEqual(selected["properties"]["thickness"], 1.25)
+
+            app.selectbox(key="overview_area").set_value(("NO", 0)).run()
+            national = json.loads(app.get("deck_gl_json_chart")[0].proto.json)["layers"][0]
+            norway = national["data"]["features"][0]["properties"]
+            self.assertEqual(norway["area_type"], "NO")
+            self.assertEqual(norway["thickness"], 1.25)
 
     def test_default_forecast_download_includes_first_required_fx_week(self):
         def rates(start, end):

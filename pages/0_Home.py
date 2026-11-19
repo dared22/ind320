@@ -125,14 +125,16 @@ for feature in geodata["features"]:
         color = [118, 138, 164, 55]
     properties.update(
         fill=color, outline=[255, 203, 126, 255] if key == area else [173, 211, 241, 200],
-        thickness=3 if key == area else 1, label=area_label(key),
+        thickness=1.25 if key == area else 0.5, label=area_label(key),
         value=f"{metric} {value:.1f} {unit}" if pd.notna(value) else "No value for this week",
         period=str(snapshot_week.date()) if pd.notna(snapshot_week) else "No week in range",
     )
 
+# Pass a literal unit so PyDeck does not treat it as a feature accessor.
 layer = pdk.Layer("GeoJsonLayer", geodata, id="regions", pickable=True,
                   get_fill_color="properties.fill", get_line_color="properties.outline",
-                  get_line_width="properties.thickness", line_width_units="pixels")
+                  get_line_width="properties.thickness", line_width_units=pdk.types.String("pixels"),
+                  line_width_max_pixels=1.25)
 deck = pdk.Deck(layer, map_style=None,
                 initial_view_state=pdk.ViewState(latitude=64.8, longitude=13.6, zoom=3.9),
                 tooltip={"html": "{properties.label}<br>{properties.value}<br>Week ending {properties.period}"})

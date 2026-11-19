@@ -43,8 +43,9 @@ def _check_weekly(series: pd.Series) -> None:
 
 
 def stl_analysis(
-    series: pd.Series, seasonal: int = 13, trend: int = 105, robust: bool = True
-) -> tuple[pd.DataFrame, dict, Figure]:
+    series: pd.Series, seasonal: int = 13, trend: int = 105, robust: bool = True,
+    *, plot: bool = True,
+) -> tuple[pd.DataFrame, dict, Figure | None]:
     """Decompose weekly percentages with a fixed 52-week annual period."""
     _check_weekly(series)
     if seasonal < 3 or seasonal % 2 != 1 or trend <= 52 or trend % 2 != 1:
@@ -53,22 +54,24 @@ def stl_analysis(
     data = pd.DataFrame(
         {"observed": series, "trend": result.trend, "seasonal": result.seasonal, "residual": result.resid}
     )
-    fig, axes = plt.subplots(4, 1, figsize=(10, 8), sharex=True)
-    for ax, column in zip(axes, data.columns):
-        ax.plot(data.index, data[column], linewidth=0.9)
-        ax.set_ylabel(f"{column.title()}\n(pp)")
-    axes[0].set_ylabel("Filling (%)")
-    axes[0].set_title(f"{series.name}: STL, 52-week period")
-    axes[-1].set_xlabel("Observation date")
-    fig.tight_layout()
+    fig = None
+    if plot:
+        fig, axes = plt.subplots(4, 1, figsize=(10, 8), sharex=True)
+        for ax, column in zip(axes, data.columns):
+            ax.plot(data.index, data[column], linewidth=0.9)
+            ax.set_ylabel(f"{column.title()}\n(pp)")
+        axes[0].set_ylabel("Filling (%)")
+        axes[0].set_title(f"{series.name}: STL, 52-week period")
+        axes[-1].set_xlabel("Observation date")
+        fig.tight_layout()
     summary = {"weeks": len(data), "residual_sd_pp": float(data.residual.std()),
                "seasonal_range_pp": float(data.seasonal.max() - data.seasonal.min())}
     return data, summary, fig
 
 
 def filling_spectrogram(
-    series: pd.Series, window: int = 104, overlap: int = 52
-) -> tuple[pd.DataFrame, dict, Figure]:
+    series: pd.Series, window: int = 104, overlap: int = 52, *, plot: bool = True,
+) -> tuple[pd.DataFrame, dict, Figure | None]:
     """Estimate density in pp²/(cycles/week), with window centers on the date axis.
 
     Hann windows and constant detrending remove each window's mean. Sampling is
@@ -86,13 +89,15 @@ def filling_spectrogram(
     spectrum.index.name = "frequency_cycles_per_week"
     spectrum.columns.name = "window_center"
     # Express power in dB relative to 1 pp²/(cycles/week), not arbitrary colors.
-    fig, ax = plt.subplots(figsize=(10, 4))
-    mesh = ax.pcolormesh(dates, frequencies, 10 * np.log10(np.maximum(power, 1e-12)), shading="auto")
-    ax.axhline(1 / 52, color="white", linestyle="--", linewidth=1, label="Annual cycle (1/52)")
-    ax.set(xlabel="Window center date", ylabel="Frequency (cycles/week)", title=f"{series.name}: spectrogram")
-    ax.legend(fontsize="small")
-    fig.colorbar(mesh, ax=ax, label="PSD (dB re 1 pp²/(cycles/week))")
-    fig.tight_layout()
+    fig = None
+    if plot:
+        fig, ax = plt.subplots(figsize=(10, 4))
+        mesh = ax.pcolormesh(dates, frequencies, 10 * np.log10(np.maximum(power, 1e-12)), shading="auto")
+        ax.axhline(1 / 52, color="white", linestyle="--", linewidth=1, label="Annual cycle (1/52)")
+        ax.set(xlabel="Window center date", ylabel="Frequency (cycles/week)", title=f"{series.name}: spectrogram")
+        ax.legend(fontsize="small")
+        fig.colorbar(mesh, ax=ax, label="PSD (dB re 1 pp²/(cycles/week))")
+        fig.tight_layout()
     # Exclude the DC bin when describing the strongest oscillation.
     peak = float(frequencies[1 + np.argmax(power[1:].mean(axis=1))])
     summary = {"weeks": len(series), "windows": len(times), "frequency_step": 1 / window,

@@ -37,3 +37,6 @@ def area_selection(widget_key: str, areas: list[tuple[str, int]]) -> tuple[str, 
         "Area", areas, format_func=area_label, key=widget_key,
         on_change=_save_area, args=(widget_key,),
     )
+
+# GeoJSON and the common dropdown use the same area identifiers.
+AREAS = [*WEATHER_AREAS, ("NO", 0)]

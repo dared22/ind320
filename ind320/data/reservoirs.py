@@ -10,7 +10,7 @@ API_BASE = "https://biapi.nve.no/magasinstatistikk/api/Magasinstatistikk"
 INTERVAL_NOTICE = (
     "NVE's public endpoint returns the full history. The app caches that download "
     "for one hour and displays the selected months. The API has no date filters, "
-    "so the month slider cannot limit the download."
+    "so the selected date range only filters the display."
 )
 
 # Keep the Part 1 English labels. Source fractions remain unchanged; the wide

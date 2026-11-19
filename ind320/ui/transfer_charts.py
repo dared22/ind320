@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
 import pandas as pd
+import plotly.graph_objects as go
 from matplotlib.figure import Figure
 
 
@@ -55,4 +56,42 @@ def transfer_lines(data: pd.DataFrame) -> Figure:
     ax.set(xlabel="Time (Europe/Oslo)", ylabel="Physical flow (MW)")
     fig.autofmt_xdate()
     fig.tight_layout()
+    return fig
+
+
+def interactive_energy_pie(summary: pd.DataFrame) -> go.Figure:
+    """Show energy from the published months and label partial coverage."""
+    values = summary.set_index("direction").energy_mwh.reindex(["import", "export"])
+    complete = len(summary) == 2 and summary.complete.all()
+    title = "Annual transferred energy (MWh)" if complete else "Observed transferred energy (MWh)"
+    fig = go.Figure(layout={"title": title})
+    if values.notna().all() and values.sum() > 0 and values.ge(0).all():
+        fig.add_trace(go.Pie(labels=["Import", "Export"], values=values))
+    else:
+        fig.add_annotation(text="No two-direction energy total available", showarrow=False)
+        fig.update_xaxes(visible=False)
+        fig.update_yaxes(visible=False)
+    return fig
+
+
+def interactive_transfer_lines(data: pd.DataFrame) -> go.Figure:
+    """Show each direction and break lines when consecutive intervals are missing."""
+    fig = go.Figure()
+    for direction, group in data.sort_values("start").groupby("direction"):
+        # Insert a single null value before each gap to keep a single legend entry.
+        gaps = group.start.ne(group.end.shift()) & group.end.shift().notna()
+        x, y, hover = [], [], []
+        for start, power, gap in zip(group.start.dt.tz_convert("UTC"), group.power_mw, gaps):
+            oslo = start.tz_convert("Europe/Oslo").strftime("%Y-%m-%d %H:%M %Z")
+            if gap:
+                x.append(start)
+                y.append(None)
+                hover.append("")
+            x.append(start)
+            y.append(power)
+            hover.append(oslo)
+        fig.add_trace(go.Scatter(x=x, y=y, mode="lines+markers", marker={"size": 2},
+                                 name=direction.title(), connectgaps=False, text=hover,
+                                 hovertemplate="%{text}<br>%{y:.2f} MW"))
+    fig.update_layout(xaxis_title="Time (UTC)", yaxis_title="Physical flow (MW)")
     return fig

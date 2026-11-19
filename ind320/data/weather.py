@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 
 import numpy as np
 import pandas as pd
@@ -142,9 +143,14 @@ def fetch_weather(
             ):
                 raise ValueError("ERA5 returned an unexpected grid cell; sampling weights cannot be applied.")
             # Atomic replacement prevents half-written JSON after interruption.
-            temporary = path.with_suffix(".tmp")
-            temporary.write_text(json.dumps(record))
-            temporary.replace(path)
+            with NamedTemporaryFile(mode="w", dir=path.parent, delete=False) as handle:
+                temporary = Path(handle.name)
+                try:
+                    json.dump(record, handle)
+                    handle.flush()
+                    temporary.replace(path)
+                finally:
+                    temporary.unlink(missing_ok=True)
             total += frame.to_numpy(dtype=float) * cell.weight
     hourly = pd.DataFrame(total / cells.weight.sum(), index=expected, columns=WEATHER_COLUMNS)
     hourly.index.name = "time"

@@ -196,42 +196,31 @@ class SharedAreaPageTests(unittest.TestCase):
         import streamlit as st
         st.cache_data.clear()
         with patch('ind320.data.reservoirs.fetch_reservoir_history', return_value=reservoir_fixture()), patch(
-            'ind320.data.weather.fetch_weather', side_effect=area_weather_fixture
+            'ind320.ui.source_cache.fetch_weather', side_effect=area_weather_fixture
         ):
             app = AppTest.from_file(str(ROOT / 'app.py'), default_timeout=30).run()
             self.assertFalse(app.exception)
-            app.switch_page('pages/6_Weather.py').run()
+            app.selectbox(key='overview_area').set_value(('EL', 4)).run()
+            app.switch_page('pages/1_Explore.py').run()
             self.assertFalse(app.exception)
-            app.selectbox(key='weather_area').set_value(('EL', 4)).run()
-            app.switch_page('pages/5_Reservoir_analysis.py').run()
-            self.assertFalse(app.exception)
-            self.assertEqual(app.selectbox(key='analysis_reservoir_area').value, ('EL', 4))
-            # The suggested video demonstration must produce a visible change.
+            self.assertEqual(app.selectbox(key='explore_area').value, ('EL', 4))
+            # Spectrogram controls still change resolution in the retained analysis.
             before = [c.value for c in app.caption if 'Frequency resolution:' in c.value][0]
             next(s for s in app.slider if s.label == 'Window length (weeks)').set_value(156).run()
-            self.assertFalse(app.exception)
             after = [c.value for c in app.caption if 'Frequency resolution:' in c.value][0]
             self.assertNotEqual(before, after)
-            # Changes made by reservoir analysis must restore on an already visited page.
-            app.selectbox(key='analysis_reservoir_area').set_value(('VASS', 2)).run()
-            app.switch_page('pages/6_Weather.py').run()
+            app.selectbox(key='explore_area').set_value(('VASS', 2)).run()
+            app.switch_page('pages/2_Forecast.py').run()
             self.assertFalse(app.exception)
-            self.assertEqual(app.selectbox(key='weather_area').value, ('VASS', 2))
-            app.switch_page('pages/1_Data.py').run()
+            self.assertEqual(app.selectbox(key='forecast_area').value, ('VASS', 2))
+            app.selectbox(key='forecast_area').set_value(('NO', 0)).run()
+            app.switch_page('pages/1_Explore.py').run()
+            self.assertEqual(app.selectbox(key='explore_area').value, ('NO', 0))
+            app.segmented_control(key='explore_panel').set_value('Weather quality').run()
             self.assertFalse(app.exception)
-            self.assertEqual(app.selectbox(key='reservoir_area').value, ('VASS', 2))
-            app.selectbox(key='reservoir_area').set_value(('EL', 1)).run()
-            app.switch_page('pages/2_Plots.py').run()
-            self.assertFalse(app.exception)
-            self.assertEqual(app.selectbox(key='reservoir_area').value, ('EL', 1))
-            app.switch_page('pages/6_Weather.py').run()
-            self.assertEqual(app.selectbox(key='weather_area').value, ('EL', 1))
-            # National weather is unavailable: keep the selection and explain it.
-            app.selectbox(key='weather_area').set_value(('NO', 0)).run()
-            self.assertFalse(app.exception)
-            self.assertTrue(any('national reservoir selection is retained' in x.value for x in app.info))
-            app.switch_page('pages/5_Reservoir_analysis.py').run()
-            self.assertEqual(app.selectbox(key='analysis_reservoir_area').value, ('NO', 0))
+            self.assertTrue(any('national selection is saved' in item.value for item in app.info))
+            app.switch_page('pages/0_Home.py').run()
+            self.assertEqual(app.selectbox(key='overview_area').value, ('NO', 0))
 
 
 if __name__ == '__main__':

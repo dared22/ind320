@@ -532,9 +532,12 @@ dependencies = [
     { name = "matplotlib" },
     { name = "numpy" },
     { name = "pandas" },
+    { name = "plotly" },
+    { name = "pydeck" },
     { name = "pymongo" },
     { name = "python-dotenv" },
     { name = "requests" },
+    { name = "river" },
     { name = "scikit-learn" },
     { name = "scipy" },
     { name = "seaborn" },
@@ -558,9 +561,12 @@ requires-dist = [
     { name = "matplotlib", specifier = ">=3.10.9" },
     { name = "numpy", specifier = ">=2.2.6" },
     { name = "pandas", specifier = ">=2.3.3" },
+    { name = "plotly", specifier = ">=6,<7" },
+    { name = "pydeck", specifier = ">=0.9.3" },
     { name = "pymongo", specifier = "==4.15.3" },
     { name = "python-dotenv", specifier = "==1.2.1" },
     { name = "requests", specifier = "==2.32.5" },
+    { name = "river", specifier = "==0.22.0" },
     { name = "scikit-learn", specifier = ">=1.7.2" },
     { name = "scipy", specifier = ">=1.15.3" },
     { name = "seaborn", specifier = ">=0.13.2" },
@@ -1320,6 +1326,19 @@ wheels = [
 ]
 
 [[package]]
+name = "plotly"
+version = "6.9.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "narwhals" },
+    { name = "packaging" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/96/07/795c79dbce40c39bece88e69d049babbd23ffa95b5d117f248db8ea03abb/plotly-6.9.0.tar.gz", hash = "sha256:967ad33e8c704fed051800d11d985eb206a9c795c14206b30a6f463ed9c67d0d", size = 6919903, upload-time = "2026-07-09T14:55:59.982Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/24/18/d8544811ab076f876c4892b3714f5b0dad335e1dc33aef826df431b8325d/plotly-6.9.0-py3-none-any.whl", hash = "sha256:36bebe2f1bb13884774fe61689c329071446f6ce4a8927fb1f0d6fb24f581236", size = 9909646, upload-time = "2026-07-09T14:55:55.421Z" },
+]
+
+[[package]]
 name = "prometheus-client"
 version = "0.26.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1714,6 +1733,28 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/2c/06/37c1a5557acf449e8e406a830a05bf885ac47d33270aec454ef78675008d/rfc3987_syntax-1.1.0.tar.gz", hash = "sha256:717a62cbf33cffdd16dfa3a497d81ce48a660ea691b1ddd7be710c22f00b4a0d", size = 14239, upload-time = "2025-07-18T01:05:05.015Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/7e/71/44ce230e1b7fadd372515a97e32a83011f906ddded8d03e3c6aafbdedbb7/rfc3987_syntax-1.1.0-py3-none-any.whl", hash = "sha256:6c3d97604e4c5ce9f714898e05401a0445a641cfa276432b0a648c80856f6a3f", size = 8046, upload-time = "2025-07-18T01:05:03.843Z" },
+]
+
+[[package]]
+name = "river"
+version = "0.22.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+    { name = "pandas" },
+    { name = "scipy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/31/23/4e4d1c99e38767c0afb4d6bcbe9a36157bf365578320d1b3356054e1fc79/river-0.22.0.tar.gz", hash = "sha256:8b06840e0d832dbd1064145e56e3f75492402716f5eb733753da3099194a3a68", size = 1404781, upload-time = "2024-11-25T23:29:10.012Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e7/b8/80d7e77399bd00788a0aa5d07331d99bbe69491ba5dbd5603cd00ede6c67/river-0.22.0-cp310-cp310-macosx_10_13_universal2.whl", hash = "sha256:dbc07c52371d43968769209ffaf84782f822ee2d9bcaa58809ab0f8cd56a493b", size = 2349268, upload-time = "2024-11-25T23:28:09.595Z" },
+    { url = "https://files.pythonhosted.org/packages/df/46/9d0c7f6ad97349e9cdc59e06fa7d0b30a58d5811a347db089ce99e61e823/river-0.22.0-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:0e86bda067c001c6e5f6768d02f6271ccbf747d2b03cbdd8d4b3d3b095b30de4", size = 2348331, upload-time = "2024-11-25T23:28:11.818Z" },
+    { url = "https://files.pythonhosted.org/packages/13/5a/bf9c743786a6829ea8f09fb1bfc088db46340773584bc0820b57940d0dd9/river-0.22.0-cp310-cp310-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:d3754d55074de5c1a409eb53901bcd2b12219de47d40ce43505f5641fc875932", size = 3042471, upload-time = "2024-11-25T23:28:13.208Z" },
+    { url = "https://files.pythonhosted.org/packages/9f/3a/5d7f25c1e6bdfa7533c722e04d708332b93743a156872c9843b767a76303/river-0.22.0-cp310-cp310-manylinux_2_17_i686.manylinux_2_5_i686.manylinux1_i686.manylinux2014_i686.whl", hash = "sha256:1ee33d698869d1dff874cd5d9554334ff3bfee9bf665b65bbf4c02b103db51d2", size = 3019502, upload-time = "2024-11-25T23:28:14.671Z" },
+    { url = "https://files.pythonhosted.org/packages/8b/23/637da9a38c2923437bd48e96ecce2b69c05d05d61a99525a44251fe2510c/river-0.22.0-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:117105ac423b226e7a02fb0ee804b62101c82e91bd6da58572ca413c1e0cf6aa", size = 3066225, upload-time = "2024-11-25T23:28:17.167Z" },
+    { url = "https://files.pythonhosted.org/packages/bf/0d/9297f60d6b717cfb48f1bd8ea336792aacac6f7476a3d91f3fc15263719d/river-0.22.0-cp310-cp310-musllinux_1_1_aarch64.whl", hash = "sha256:d7419fa7fd7b025fe3c1165aec60348cd7b3e19ebbf9a0acf9f06dfead0a0560", size = 3590428, upload-time = "2024-11-25T23:28:18.815Z" },
+    { url = "https://files.pythonhosted.org/packages/5c/9f/220447897d45e7ddabf0faf337b9ac9c682a31b1d286869915c924b8e9cb/river-0.22.0-cp310-cp310-musllinux_1_1_x86_64.whl", hash = "sha256:081f0efc3bf51daf2092b7fc1d85fd372b16c4634ac6558f69c2ab5522c48ea1", size = 3619042, upload-time = "2024-11-25T23:28:21.03Z" },
+    { url = "https://files.pythonhosted.org/packages/27/95/9b5e664a19fb8055a70971a279d9aa28eb01a3fd5568918215ae31790adc/river-0.22.0-cp310-cp310-win32.whl", hash = "sha256:b60947a16aab1475cfb7f2c866b7b6ee492c2325affc307883099168f2090d9c", size = 1766349, upload-time = "2024-11-25T23:28:22.662Z" },
+    { url = "https://files.pythonhosted.org/packages/4f/a3/e42c4072260e1537c10f2123bb67545cd76ac8dd50d2b9e22ffdada545f2/river-0.22.0-cp310-cp310-win_amd64.whl", hash = "sha256:875573237620e8d3ea17ba4f630105e885c2961abac8978d87edc15100211e06", size = 1871266, upload-time = "2024-11-25T23:28:23.951Z" },
 ]
 
 [[package]]

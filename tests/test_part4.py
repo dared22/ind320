@@ -1,0 +1,144 @@
+"""Forecast, timing and navigation regressions for Part 4."""
+
+import json
+from datetime import date
+from pathlib import Path
+import unittest
+from unittest.mock import Mock, patch
+
+import numpy as np
+import pandas as pd
+from streamlit.proto.WidgetStates_pb2 import WidgetStates
+from streamlit.testing.v1 import AppTest
+
+from ind320.analysis.forecast import forecast_reservoir
+from ind320.data.exchange import fetch_exchange_rates
+from ind320.data.weeks import OSLO, cutoff_time, reservoir_weeks, weekly_flows, weekly_fx, weekly_weather
+from test_feedback_fixes import reservoir_fixture
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+class SourceAlignmentTests(unittest.TestCase):
+    def test_business_day_csv_preserves_rates_and_dates(self):
+        response = Mock(content=b"BASE_CUR;TIME_PERIOD;OBS_VALUE;UNIT_MULT\n"
+                                 b"EUR;2024-03-27;11.64;0\nUSD;2024-03-27;10.8;0\n"
+                                 b"EUR;2024-04-02;11.67;0\nUSD;2024-04-02;10.89;0")
+        with patch("ind320.data.exchange.requests.get", return_value=response) as download:
+            rates = fetch_exchange_rates("2024-03-25", "2024-04-03")
+        self.assertIn("B.EUR+USD.NOK.SP", download.call_args.args[0])
+        self.assertEqual(rates.pair.unique().tolist(), ["EUR/NOK", "USD/NOK"])
+        self.assertEqual(len(rates), 4)
+        quote = weekly_fx(rates).loc[(pd.Timestamp("2024-03-31"), "EUR/NOK")]
+        self.assertEqual(quote.nok_per_unit, 11.64)
+        self.assertEqual(quote.available_at, pd.Timestamp("2024-03-27 16:00", tz=OSLO))
+
+    def test_weather_uses_actual_dst_hours_and_preceding_precipitation(self):
+        for sunday, hours in [("2024-03-31", 167), ("2024-10-27", 169)]:
+            week = pd.Timestamp(sunday)
+            ends_at = (week + pd.Timedelta(days=1)).tz_localize(OSLO).tz_convert("UTC")
+            index = pd.date_range(end=ends_at, periods=hours + 1, freq="h")
+            data = pd.DataFrame({"precipitation": 1.0, "temperature_2m": 12.0}, index=index)
+            data.iloc[0, 0] = 1000.0  # This amount belongs to the previous week.
+            data.iloc[-1, 1] = 1000.0  # This instant belongs to the following week.
+            result = weekly_weather(data).loc[week]
+            self.assertEqual(result.precipitation, hours)
+            self.assertEqual(result.temperature_2m, 12)
+
+    def test_weekly_flows_clip_intervals_and_reject_missing_direction(self):
+        week = pd.Timestamp("2024-03-31")
+        start = pd.Timestamp("2024-03-25 00:00", tz=OSLO).tz_convert("UTC")
+        end = pd.Timestamp("2024-04-01 00:00", tz=OSLO).tz_convert("UTC")
+        periods = pd.DataFrame({
+            "start": [start - pd.Timedelta(hours=1)] * 2, "end": [end + pd.Timedelta(hours=1)] * 2,
+            "connection": "NO3–SE2", "direction": ["import", "export"], "power_mw": [3, 1],
+        })
+        result = weekly_flows(periods)
+        self.assertEqual(result.loc[week, "net_import_mwh"], 334)
+        self.assertTrue(weekly_flows(periods.iloc[:1]).empty)
+
+    def test_nve_next_release_belongs_to_following_week(self):
+        source = pd.DataFrame({
+            "Area Type": "EL", "Area Code": 3, "Iso Year": 2024, "Iso Week": [12, 13],
+            "Next Publication Date": pd.to_datetime(["2024-04-04 13:00", "2024-04-10 13:00"]),
+        })
+        rows = reservoir_weeks(source)
+        self.assertEqual(rows.available_at.iloc[0], pd.Timestamp("2024-03-27 13:00", tz=OSLO))
+        self.assertEqual(rows.available_at.iloc[1], pd.Timestamp("2024-04-04 13:00", tz=OSLO))
+
+
+class ForecastTests(unittest.TestCase):
+    def test_future_targets_and_weather_cannot_change_the_interval_forecast(self):
+        rows = reservoir_weeks(reservoir_fixture())
+        cutoff = cutoff_time("2022-12-14")
+        weeks = pd.date_range("2019-12-22", "2023-07-02", freq="W-SUN")
+        weather = pd.DataFrame({
+            "temperature_2m": 10 + np.sin(np.arange(len(weeks)) / 5),
+            "available_at": (weeks + pd.Timedelta(days=6)).tz_localize(OSLO),
+        }, index=weeks)
+        options = dict(area=("EL", 3), cutoff=cutoff, training_weeks=104,
+                       horizon=13, order=(2, 1, 1), selected_inputs=("temperature_2m",))
+        before = forecast_reservoir(rows, {"temperature_2m": weather}, **options)
+        rows.loc[rows.available_at.gt(cutoff), "Fill Level"] = 500
+        weather.loc[weather.available_at.gt(cutoff), "temperature_2m"] = 500
+        after = forecast_reservoir(rows, {"temperature_2m": weather}, **options)
+        pd.testing.assert_frame_equal(before, after)
+        self.assertEqual(len(after), 13)
+        self.assertTrue((after.lower <= after["median"]).all())
+        self.assertTrue((after["median"] <= after.upper).all())
+        self.assertEqual(after.attrs["training_end"], pd.Timestamp("2022-12-11"))
+
+    def test_map_and_forecast_share_dates_and_horizon(self):
+        with patch("ind320.data.reservoirs.fetch_reservoir_history", return_value=reservoir_fixture()):
+            app = AppTest.from_file(str(ROOT / "app.py"), default_timeout=30).run()
+            app.date_input(key="overview_start").set_value(date(2020, 2, 1)).run()
+            app.date_input(key="overview_end").set_value(date(2023, 1, 15)).run()
+            app.slider(key="overview_horizon").set_value(17).run()
+            app.switch_page("pages/2_Forecast.py").run()
+            self.assertFalse(app.exception)
+            self.assertEqual(app.date_input(key="forecast_start").value, date(2020, 2, 1))
+            self.assertEqual(app.date_input(key="forecast_end").value, date(2023, 1, 15))
+            self.assertEqual(app.slider(key="forecast_horizon").value, 17)
+            app.slider(key="forecast_horizon").set_value(9).run()
+            app.switch_page("pages/0_Home.py").run()
+            self.assertEqual(app.slider(key="overview_horizon").value, 9)
+
+
+    def test_polygon_selection_updates_the_saved_area_and_outline(self):
+        with patch("ind320.data.reservoirs.fetch_reservoir_history", return_value=reservoir_fixture()):
+            app = AppTest.from_file(str(ROOT / "app.py")).run()
+            chart = app.get("deck_gl_json_chart")[0].proto
+            layer = json.loads(chart.json)["layers"][0]
+            feature = layer["data"]["features"][0]
+            properties = feature["properties"]
+            self.assertEqual((properties["area_type"], properties["area_code"]), ("EL", 1))
+            states = WidgetStates()
+            states.widgets.add(id=chart.id, string_value=json.dumps({
+                "selection": {"indices": {"regions": [0]}, "objects": {"regions": [feature]}},
+            }))
+            # AppTest has no PyDeck click helper, so submit the browser's widget event.
+            app._run(states)
+            self.assertFalse(app.exception)
+            self.assertEqual(app.selectbox(key="overview_area").value, ("EL", 1))
+            current = app.get("deck_gl_json_chart")[0].proto
+            selected = json.loads(current.json)["layers"][0]["data"]["features"][0]
+            self.assertEqual(selected["properties"]["thickness"], 3)
+
+    def test_default_forecast_download_includes_first_required_fx_week(self):
+        def rates(start, end):
+            dates = pd.date_range(start, end, freq="B")
+            return pd.concat([pd.DataFrame({
+                "date": dates, "pair": pair, "nok_per_unit": 11 + np.sin(np.arange(len(dates))),
+            }) for pair in ("EUR/NOK", "USD/NOK")], ignore_index=True)
+
+        with patch("ind320.data.reservoirs.fetch_reservoir_history", return_value=reservoir_fixture()), patch(
+            "ind320.ui.source_cache.fetch_exchange_rates", side_effect=rates
+        ):
+            app = AppTest.from_file(str(ROOT / "app.py")).run()
+            app.switch_page("pages/2_Forecast.py").run()
+            app.button[0].click().run()
+            self.assertFalse(app.exception)
+            self.assertFalse(app.error, [item.value for item in app.error])
+            result = app.session_state["last_forecast"][1]
+            self.assertEqual(len(result), 13)
+            self.assertTrue((result.lower <= result["median"]).all())

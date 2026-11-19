@@ -1,8 +1,9 @@
 # IND320 — Data to Decision
 
 An NMBU course project exploring Norwegian reservoir filling, cross-border
-physical electricity flows, and weather quality. The Jupyter notebooks document
-preparation, methods and checks; Streamlit exposes the same shared functions.
+physical electricity flows, weather quality, and reservoir forecasts. The
+Jupyter notebooks document the methods and checks. Streamlit uses the same
+analysis functions.
 
 - [Live Streamlit app](https://cklqlkatpe9mqyrnuch2ma.streamlit.app/)
 - [Public repository](https://github.com/dared22/ind320)
@@ -18,7 +19,7 @@ uv run streamlit run app.py
 ```
 
 For the dashboard alone, `uv sync --locked` omits notebook/GIS/Spark dependencies.
-Reservoir and weather pages use public APIs without credentials and need internet
+Reservoir, weather, and exchange-rate downloads use public APIs and need internet
 access. The first weather download can be slow or rate-limited because it covers
 many grid cells. Completed cells are cached under `.local/weather/`; rerunning
 resumes downloads without showing an incomplete area average. Cloud caches can
@@ -28,10 +29,12 @@ be lost on app restart.
 
 | Path | Contents |
 | --- | --- |
-| `app.py`, `pages/` | Streamlit entry point and dashboard pages |
+| `app.py`, `pages/` | Map & Overview, Explore & Quality, and Forecast |
 | `notebooks/project_notebook_ca1.ipynb` | Part 1 exploration; now retrieves the source through the API instead of a missing CSV |
 | `notebooks/project_notebook.ipynb` | Part 2: NVE, ENTSO-E, Spark/Cassandra and MongoDB |
 | `notebooks/project_notebook_part3.ipynb` | Part 3: sampling, weather, DCT/SPC, LOF, STL and spectrogram |
+| `notebooks/project_notebook_part4.ipynb` | Part 4: time alignment, correlation, River backtesting and forecast intervals |
+| `data/reservoir_areas.geojson` | WGS84 national, price-area and approximate water-area boundaries |
 | `ind320/data/` | API downloads, spatial sampling and preparation |
 | `ind320/analysis/` | Shared weather and reservoir calculations/figures |
 | `ind320/ui/` | Shared area selection and chart controls |
@@ -40,7 +43,7 @@ be lost on app restart.
 | `Budomraader/`, `NVE_Region/` | Supplied shapefiles used to generate the sample |
 | `tests/` | Offline regression checks with simulated API responses |
 | `docs/screencast-checklist.md` | Follow-up video demonstration, including spectrogram settings |
-| `output/pdf/` | Earlier submission exports; regenerate after running the revised notebooks |
+| `output/pdf/` | Executed notebook exports, including Part 4 |
 
 ## Notebooks
 
@@ -55,25 +58,26 @@ cells are weighted by the number of sampled points in each cell. Requests use
 `cell_selection=nearest` and `elevation=nan`, with the 0.25° ERA5 model. Spatial
 averages retain the limitations of that grid and the approximate grouped NVE
 boundaries. East/West/North map to VASS 1/2/3 in the shared selector. National
-reservoir data has no sampled weather counterpart; the weather page explains
-this rather than switching to another area.
+reservoir data uses its own NVE series. Weather overlays are available in the
+price-area and water-area views.
 
 Run **all cells with live sources** before exporting an updated submission PDF.
 For example, after selecting the project's Python kernel:
 
 ```sh
-uv run jupyter nbconvert --execute --to notebook --inplace notebooks/project_notebook_part3.ipynb
-uv run jupyter nbconvert --to webpdf --allow-chromium-download --output-dir output/pdf notebooks/project_notebook_part3.ipynb
+uv run jupyter nbconvert --execute --to notebook --inplace notebooks/project_notebook_part4.ipynb
+uv run jupyter nbconvert --to webpdf --allow-chromium-download --output-dir output/pdf notebooks/project_notebook_part4.ipynb
 ```
 
 The optional `webpdf` export needs the nbconvert WebPDF extra and its browser:
 `uv pip install 'nbconvert[webpdf]'`. Exporting through Jupyter's browser print
 view is another option. Part 1's log is historical; current changes and AI use
-are described in the Part 3 notebook.
+are described in the Part 4 notebook.
 
 ## Transfers and private settings
 
-The Transfers page additionally requires an existing MongoDB publication. Create
+The Transfers section and the optional net-import forecast input use the
+existing MongoDB publication. Create
 local `.env` settings or Streamlit Cloud secrets using the following names:
 
 | Setting | Purpose |
@@ -89,8 +93,7 @@ local `.env` settings or Streamlit Cloud secrets using the following names:
 Running the complete Part 2 pipeline also needs a running Cassandra service and
 Java compatible with Spark 3.5 (for example Java 17). It downloads the Spark
 Cassandra connector on first use. The notebook ingests ENTSO-E, writes and reads
-Cassandra through Spark, then publishes to MongoDB. The app only queries MongoDB;
-it never starts ingestion on a page rerun. Never commit credentials, `.env`,
+Cassandra through Spark, then publishes to MongoDB. The app reads the published MongoDB collections during queries. Never commit credentials, `.env`,
 Streamlit secrets or local caches.
 
 ## Verify changes

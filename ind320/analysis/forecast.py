@@ -1,5 +1,6 @@
 """Chronological River forecasts shared by Jupyter and Streamlit."""
 
+from bisect import bisect_left
 from collections.abc import Mapping
 
 import numpy as np
@@ -11,6 +12,39 @@ from ind320.data.weeks import OSLO, WEEK
 # Weather needs more lead time than the business-day rates and interval flows.
 FEATURE_LAGS = {"temperature_2m": 2, "precipitation": 2, "EUR/NOK": 1, "USD/NOK": 1,
                 "net_import_mwh": 1}
+MIN_INTERVAL_ERRORS = 12
+
+
+def _future_inputs(
+    sources: dict[str, pd.DataFrame], dates: pd.DatetimeIndex, cutoff: pd.Timestamp,
+) -> list[dict]:
+    """Build the same lagged persistence scenario at live and historical origins."""
+    if not sources:
+        return [{} for _ in dates]
+    inputs = pd.DataFrame(index=dates)
+    for feature, source in sources.items():
+        known = source.loc[source.available_at.le(cutoff), feature].dropna()
+        if known.empty:
+            raise ValueError(f"No values for {feature} were available by the forecast cutoff.")
+        later = known.reindex(dates - FEATURE_LAGS[feature] * WEEK)
+        # Gaps within the historical archive remain missing.
+        later = later.mask(later.index > known.index[-1], known.iloc[-1])
+        if later.isna().any():
+            raise ValueError(f"{feature} has a gap in the lagged inputs for this forecast.")
+        inputs[feature] = later.to_numpy()
+    return inputs.to_dict("records")
+
+
+def _error_quantile(errors: np.ndarray, alpha: float) -> float:
+    """Find the breakpoint that minimizes River's quantile loss."""
+    ordered = np.sort(errors)
+    loss = optim.losses.Quantile(alpha)
+
+    def gradient_right_of(value: float) -> float:
+        # Evaluate immediately to the right to include all samples equal to this error.
+        return float(loss.gradient(ordered, np.nextafter(value, np.inf)).mean())
+
+    return float(ordered[bisect_left(ordered, -1e-12, key=gradient_right_of)])
 
 
 def forecast_reservoir(
@@ -36,19 +70,20 @@ def forecast_reservoir(
     ].sort_values("week")
     if selected.empty:
         raise ValueError("There are no published NVE observations for this region and cutoff.")
-    history = selected.set_index("week")["Fill Level"]
+    selected = selected.set_index("week")
+    history = selected["Fill Level"]
     if history.index.has_duplicates:
         raise ValueError("NVE returned duplicate observations for this region and week.")
     last = history.index[-1]
     past = pd.date_range(end=last, periods=training_weeks, freq="W-SUN", name="week")
-    target = history.reindex(past)
+    actual = history.reindex(past)
     # Allow isolated gaps using only previous observations. Longer gaps require a different window.
-    target = target.ffill(limit=1) if past[0] in history.index else target
+    target = actual.ffill(limit=1)
     if target.isna().any():
         raise ValueError("NVE coverage is incomplete for the selected training window.")
     future = pd.date_range(last + WEEK, periods=horizon, freq="W-SUN", name="week")
     train_features = pd.DataFrame(index=past)
-    future_features = pd.DataFrame(index=future)
+    prepared_sources = {}
     for feature in selected_inputs:
         if feature not in sources or feature not in FEATURE_LAGS:
             raise ValueError(f"No source is available for {feature}.")
@@ -69,30 +104,46 @@ def forecast_reservoir(
             raise ValueError(f"{feature} lacks training coverage from {dates[0]:%Y-%m-%d} "
                              f"to {dates[-1]:%Y-%m-%d}. Adjust the dates or inputs.")
         train_features[feature] = historical.to_numpy()
-        later = known.reindex(future - lag)
-        # A missing past week is a coverage issue, while future weeks use persistence.
-        beyond = later.index > known.index[-1]
-        later = later.mask(beyond, known.iloc[-1])
-        if later.isna().any():
-            raise ValueError(f"{feature} has a gap in the lagged inputs for this forecast.")
-        future_features[feature] = later.to_numpy()
-    quantiles = {"median": 0.5, "lower": 0.1, "upper": 0.9} if intervals else {"median": 0.5}
+        prepared_sources[feature] = source
+    future_inputs = _future_inputs(prepared_sources, future, cutoff)
     result = pd.DataFrame(index=future)
     train_records = train_features.to_dict("records") if selected_inputs else [{} for _ in past]
-    future_records = future_features.to_dict("records") if selected_inputs else [{} for _ in future]
-    for name, quantile in quantiles.items():
-        regressor = preprocessing.StandardScaler() | linear_model.LinearRegression(
-            optimizer=optim.SGD(0.01), loss=optim.losses.Quantile(quantile),
-        )
-        model = time_series.SNARIMAX(*order, m=52, sp=1, regressor=regressor)
-        for value, features in zip(target, train_records):
-            model.learn_one(float(value), features.copy())
+    regressor = preprocessing.StandardScaler() | linear_model.LinearRegression(
+        optimizer=optim.SGD(0.01), loss=optim.losses.Quantile(0.5),
+    )
+    season = 52
+    model = time_series.SNARIMAX(*order, m=season, sp=1, regressor=regressor)
+    # Use up to the most recent year of origins after at least one full season of learning.
+    calibration_start = max(season, len(past) - season)
+    releases = selected.available_at.reindex(past)
+    latest_release = releases.ffill().cummax()
+    errors = np.full((len(past), horizon), np.nan) if intervals else None
+    for row, (value, features) in enumerate(zip(target, train_records)):
         # River adds autoregressive terms to the supplied dictionaries in place.
-        result[name] = np.clip(model.forecast(horizon, [row.copy() for row in future_records]), 0, 1) * 100
+        model.learn_one(float(value), features.copy())
+        if (errors is None or row + 1 < calibration_start
+                or pd.isna(releases.iloc[row]) or row + 1 == len(past)):
+            continue
+        # Score forecasts made before these target observations were published.
+        targets = slice(row + 1, row + 1 + horizon)
+        dates = past[targets]
+        origin = latest_release.iloc[row]
+        try:
+            features_at_origin = _future_inputs(prepared_sources, dates, origin)
+        except ValueError:
+            continue  # Some inputs may be missing as of the historical origin.
+        prediction = np.clip(model.forecast(len(dates), features_at_origin), 0, 1)
+        outcomes = actual.iloc[targets].where(releases.iloc[targets].gt(origin))
+        errors[row, :len(dates)] = (outcomes.to_numpy() - prediction) * 100
+
+    result["median"] = np.clip(model.forecast(horizon, future_inputs), 0, 1) * 100
     if intervals:
-        result["crossed"] = (result.lower > result["median"]) | (result.upper < result["median"])
-        bounds = result[["lower", "median", "upper"]]
-        result["lower"], result["upper"] = bounds.min(axis=1), bounds.max(axis=1)
+        samples = [column[np.isfinite(column)] for column in errors.T]
+        result["interval_samples"] = [len(sample) for sample in samples]
+        for name, alpha, bound in (("lower", 0.10, min), ("upper", 0.90, max)):
+            offsets = [bound(0, _error_quantile(sample, alpha)) if len(sample) >= MIN_INTERVAL_ERRORS
+                       else np.nan for sample in samples]
+            result[name] = (result["median"] + offsets).clip(0, 100)
     result.attrs.update(training_start=past[0], training_end=last, cutoff=cutoff,
-                        imputed=int(history.reindex(past).isna().sum()))
+                        imputed=int(actual.isna().sum()))
     return result

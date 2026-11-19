@@ -15,11 +15,12 @@ def forecast_chart(observed: pd.Series, forecast: pd.DataFrame) -> go.Figure:
         dates = [observed.index[-1], *data.index]
         anchor = observed.iloc[-1]
         return [
-            go.Scatter(x=dates, y=[anchor, *data.lower], line={"width": 0},
+            go.Scatter(x=dates, y=[anchor, *data.lower], mode="lines", line={"width": 0},
                        showlegend=False, hoverinfo="skip"),
-            go.Scatter(x=dates, y=[anchor, *data.upper], line={"width": 0},
+            go.Scatter(x=dates, y=[anchor, *data.upper], mode="lines", line={"width": 0},
                        fill="tonexty", fillcolor=PLOT_BAND,
-                       name="Nominal 80% interval", hoverinfo="skip"),
+                       name="Nominal 80% interval", hoverinfo="skip",
+                       showlegend=bool(data.upper.notna().any())),
             go.Scatter(x=dates, y=[anchor, *data["median"]], name="Median forecast",
                        line={"color": WARM_ACCENT, "dash": "dash"}),
         ]

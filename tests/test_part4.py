@@ -68,6 +68,34 @@ class SourceAlignmentTests(unittest.TestCase):
 
 
 class ForecastTests(unittest.TestCase):
+    def test_interval_width_reflects_errors_on_a_stable_seasonal_series(self):
+        weeks = pd.date_range("2021-01-03", periods=156, freq="W-SUN")
+        season = 0.55 + 0.12 * np.sin(np.arange(len(weeks)) * 2 * np.pi / 52)
+        observed = reservoir_weeks(pd.DataFrame({
+            "Observation Date": weeks, "Area Type": "EL", "Area Code": 3,
+            "Fill Level": season + np.random.default_rng(0).normal(0, 0.01, len(weeks)),
+        }))
+        options = dict(area=("EL", 3), cutoff=cutoff_time("2024-01-05"),
+                       training_weeks=156, horizon=13, order=(2, 1, 1))
+        band = forecast_reservoir(observed, {}, **options)
+        # This predictable series spans roughly 25 pp, unlike the old 71 pp interval.
+        self.assertLess((band.upper - band.lower).iloc[-1], 35)
+        point = forecast_reservoir(observed, {}, intervals=False, **options)
+        pd.testing.assert_series_equal(band["median"], point["median"])
+
+    def test_long_horizon_with_short_history_only_shows_supported_bounds(self):
+        observations = reservoir_weeks(reservoir_fixture())
+        forecast = forecast_reservoir(
+            observations, {}, area=("EL", 3), cutoff=cutoff_time("2023-01-04"),
+            training_weeks=78, horizon=26, order=(2, 1, 1),
+        )
+        self.assertFalse(forecast["median"].isna().any())
+        self.assertTrue(np.isfinite(forecast.lower.iloc[0]))
+        self.assertTrue(np.isfinite(forecast.upper.iloc[0]))
+        self.assertEqual(forecast.interval_samples.iloc[-1], 1)
+        self.assertTrue(pd.isna(forecast.lower.iloc[-1]))
+        self.assertTrue(pd.isna(forecast.upper.iloc[-1]))
+
     def test_future_targets_and_weather_cannot_change_the_interval_forecast(self):
         rows = reservoir_weeks(reservoir_fixture())
         cutoff = cutoff_time("2022-12-14")

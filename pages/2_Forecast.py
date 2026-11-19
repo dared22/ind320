@@ -5,7 +5,7 @@ import requests
 import streamlit as st
 from pymongo.errors import PyMongoError
 
-from ind320.analysis.forecast import FEATURE_LAGS, forecast_reservoir
+from ind320.analysis.forecast import FEATURE_LAGS, MIN_INTERVAL_ERRORS, forecast_reservoir
 from ind320.analysis.forecast_defaults import DEFAULT_INPUTS, DEFAULT_ORDER
 from ind320.data.reservoirs import fetch_reservoir_history
 from ind320.data.transfers import CONNECTIONS
@@ -84,7 +84,7 @@ if submitted:
             sources.update({feature: weather for feature in ("temperature_2m", "precipitation")})
         if "net_import_mwh" in features:
             sources["net_import_mwh"] = flow_weeks(connection, first - FEATURE_LAGS["net_import_mwh"] * WEEK, last)
-        with st.spinner("Fitting the three forecast quantiles…"):
+        with st.spinner("Fitting the forecast and estimating the interval…"):
             result = forecast_reservoir(history, sources, area=area, cutoff=cutoff,
                                         training_weeks=training_weeks, horizon=horizon,
                                         order=(p, d, q), selected_inputs=features)
@@ -95,14 +95,17 @@ if submitted:
         st.error(f"The forecast could not run. {error}")
 
 saved = st.session_state.get("last_forecast")
-if saved and saved[0] == selection:
+if saved and saved[0] == selection and "interval_samples" in saved[1]:
     result = saved[1]
     observed = published.set_index("week")["Fill Level"] * 100
     st.plotly_chart(forecast_chart(observed, result))
     pending = result.index[result.index.date < end]
     if len(pending):
         st.caption(f"An NVE reading is pending for the week ending {pending[-1]:%d %b %Y}.")
-    st.caption("The nominal 80% band is conditional on the selected inputs and persistence scenario.")
+    st.caption("The nominal 80% band uses past forecast errors at the same lead time "
+               "under the selected inputs and persistence scenario.")
+    if result.interval_samples.lt(MIN_INTERVAL_ERRORS).any():
+        st.caption(f"Weeks with fewer than {MIN_INTERVAL_ERRORS} historical errors show the median only.")
     with st.expander("Weekly predictions"):
         predictions = result[["lower", "median", "upper"]].round(2)
         predictions.attrs.clear()  # Internal timestamps belong in the fit metadata.

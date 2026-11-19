@@ -1,4 +1,4 @@
-"""Draw a fixed-axis Plotly animation of the River trajectories."""
+"""Draw a fixed-axis Plotly animation of the SARIMAX forecast and interval."""
 
 import pandas as pd
 import plotly.graph_objects as go

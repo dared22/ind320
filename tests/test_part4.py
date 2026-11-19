@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 from streamlit.proto.WidgetStates_pb2 import WidgetStates
 from streamlit.testing.v1 import AppTest
+from statsmodels.tsa.statespace.sarimax import SARIMAX
 
 from ind320.analysis.forecast import forecast_reservoir
 from ind320.data.exchange import fetch_exchange_rates
@@ -161,21 +162,28 @@ class ForecastTests(unittest.TestCase):
             self.assertEqual(norway["area_type"], "NO")
             self.assertEqual(norway["thickness"], 1.25)
 
-    def test_default_forecast_download_includes_first_required_fx_week(self):
+    def test_forecast_fits_classical_sarimax_with_selected_fx_inputs(self):
         def rates(start, end):
             dates = pd.date_range(start, end, freq="B")
             return pd.concat([pd.DataFrame({
-                "date": dates, "pair": pair, "nok_per_unit": 11 + np.sin(np.arange(len(dates))),
-            }) for pair in ("EUR/NOK", "USD/NOK")], ignore_index=True)
+                "date": dates, "pair": pair,
+                "nok_per_unit": 11 + np.sin(np.arange(len(dates)) / (7 + offset)),
+            }) for offset, pair in enumerate(("EUR/NOK", "USD/NOK"))], ignore_index=True)
 
         with patch("ind320.data.reservoirs.fetch_reservoir_history", return_value=reservoir_fixture()), patch(
             "ind320.ui.source_cache.fetch_exchange_rates", side_effect=rates
-        ):
-            app = AppTest.from_file(str(ROOT / "app.py")).run()
+        ), patch(
+            "ind320.analysis.forecast.SARIMAX", wraps=SARIMAX
+        ) as fit_model:
+            app = AppTest.from_file(str(ROOT / "app.py"), default_timeout=90).run()
             app.switch_page("pages/2_Forecast.py").run()
+            app.multiselect[0].set_value(["EUR/NOK", "USD/NOK"])
             app.button[0].click().run()
             self.assertFalse(app.exception)
             self.assertFalse(app.error, [item.value for item in app.error])
+            model_settings = fit_model.call_args_list[0].kwargs
+            self.assertEqual(model_settings["seasonal_order"], (1, 0, 0, 52))
+            self.assertEqual(list(model_settings["exog"]), ["EUR/NOK", "USD/NOK"])
             result = app.session_state["last_forecast"][1]
             self.assertEqual(len(result), 13)
             self.assertTrue((result.lower <= result["median"]).all())

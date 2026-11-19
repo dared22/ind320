@@ -1,11 +1,11 @@
-"""Run the notebook's River model on the selected area and timeframe."""
+"""Run the notebook's SARIMAX model on the selected area and timeframe."""
 
 import pandas as pd
 import requests
 import streamlit as st
 from pymongo.errors import PyMongoError
 
-from ind320.analysis.forecast import FEATURE_LAGS, MIN_INTERVAL_ERRORS, forecast_reservoir
+from ind320.analysis.forecast import FEATURE_LAGS, MIN_INTERVAL_ERRORS, SEASON, forecast_reservoir
 from ind320.analysis.forecast_defaults import DEFAULT_INPUTS, DEFAULT_ORDER
 from ind320.data.reservoirs import fetch_reservoir_history
 from ind320.data.transfers import CONNECTIONS
@@ -19,7 +19,7 @@ FEATURE_NAMES = {"temperature_2m": "Weekly mean temperature", "precipitation": "
                  "EUR/NOK": "EUR/NOK", "USD/NOK": "USD/NOK", "net_import_mwh": "ENTSO-E net imports"}
 
 st.title("Forecast")
-st.caption("Weekly reservoir filling · River SARIMAX")
+st.caption(f"Weekly reservoir filling · SARIMAX with a {SEASON}-week season")
 area = area_selection("forecast_area", AREAS)
 try:
     history = reservoir_weeks(fetch_reservoir_history())
@@ -62,8 +62,8 @@ with st.form("forecast_settings"):
                "for the rest of the forecast. Net imports require both flow directions in MongoDB.")
     submitted = st.form_submit_button("Run forecast", type="primary")
 
-# Clear results when controls outside the form change so old forecasts can't be misread.
-selection = (area, start, end, horizon)
+# Discard results from an earlier model or a different shared selection.
+selection = ("SARIMAX", area, start, end, horizon)
 if submitted:
     st.session_state.pop("last_forecast", None)
     try:

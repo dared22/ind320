@@ -8,6 +8,7 @@ from unittest.mock import Mock, patch
 
 import numpy as np
 import pandas as pd
+import requests
 from streamlit.proto.WidgetStates_pb2 import WidgetStates
 from streamlit.testing.v1 import AppTest
 from statsmodels.tsa.statespace.sarimax import SARIMAX
@@ -69,6 +70,37 @@ class SourceAlignmentTests(unittest.TestCase):
 
 
 class ForecastTests(unittest.TestCase):
+    def test_hourly_weather_limit_runs_forecast_with_a_persistent_notice(self):
+        limit = requests.Response()
+        limit.status_code = 429
+        error = requests.HTTPError("Hourly API request limit exceeded.", response=limit)
+        weeks = pd.date_range("2022-06-19", periods=13, freq="W-SUN")
+        predictions = pd.DataFrame({"median": 50., "lower": 40., "upper": 60.,
+                                    "interval_samples": 20}, index=weeks)
+        fx = pd.DataFrame({"week": weeks, "pair": "EUR/NOK", "nok_per_unit": 11.0}).set_index(["week", "pair"])
+        with patch("ind320.data.reservoirs.fetch_reservoir_history", return_value=reservoir_fixture()), patch(
+            "ind320.ui.source_cache.exchange_weeks", return_value=fx
+        ), patch(
+            "ind320.ui.source_cache.weather_weeks", side_effect=error
+        ) as download, patch("ind320.analysis.forecast.forecast_reservoir", return_value=predictions) as fit:
+            app = AppTest.from_file(str(ROOT / "app.py"), default_timeout=30).run()
+            app.switch_page("pages/2_Forecast.py").run()
+            app.multiselect[0].set_value(["temperature_2m", "precipitation", "EUR/NOK"])
+            app.button[0].click().run()
+            self.assertFalse(app.error, [item.value for item in app.error])
+            self.assertFalse(app.exception)
+            self.assertEqual(fit.call_args.kwargs["selected_inputs"], ("EUR/NOK",))
+            self.assertTrue(any("Weekly mean temperature" in item.value for item in app.warning))
+            app.run()
+            self.assertTrue(any("Weekly precipitation total" in item.value for item in app.warning))
+            download.assert_called_once()
+            download.side_effect = None
+            download.return_value = pd.DataFrame(index=weeks)
+            app.button[0].click().run()
+            self.assertFalse(app.warning)
+            self.assertEqual(fit.call_args.kwargs["selected_inputs"],
+                             ("temperature_2m", "precipitation", "EUR/NOK"))
+
     def test_interval_width_reflects_errors_on_a_stable_seasonal_series(self):
         weeks = pd.date_range("2021-01-03", periods=156, freq="W-SUN")
         season = 0.55 + 0.12 * np.sin(np.arange(len(weeks)) * 2 * np.pi / 52)

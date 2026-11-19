@@ -108,21 +108,30 @@ def fetch_weather(
     cells = weather_grid_cells(coordinates.loc[[area]])
     cache = Path(cache_dir) if cache_dir is not None else ROOT / ".local" / "weather"
     # Version the cache so old single-point data cannot be reused as area data.
-    cache = cache / f"era5-nearest-v1_{start:%Y-%m-%d}_{end:%Y-%m-%d}"
-    cache.mkdir(parents=True, exist_ok=True)
+    start_label, end_label = f"{start:%Y-%m-%d}", f"{end:%Y-%m-%d}"
+    target_cache = cache / f"era5-nearest-v1_{start_label}_{end_label}"
+    target_cache.mkdir(parents=True, exist_ok=True)
+    # A narrower forecast can use cells already downloaded for a longer range.
+    cached_ranges = [(target_cache, expected)]
+    for directory in sorted(cache.glob("era5-nearest-v1_????-??-??_????-??-??")):
+        _, cached_start, cached_end = directory.name.split("_")
+        if directory != target_cache and cached_start <= start_label <= end_label <= cached_end:
+            covered = pd.date_range(cached_start, pd.Timestamp(cached_end) + pd.Timedelta(hours=23),
+                                    freq="h", tz="UTC")
+            cached_ranges.append((directory, covered))
     total = np.zeros((len(expected), len(WEATHER_COLUMNS)))
     pending = []
     for cell in cells.itertuples(index=False):
-        path = cache / f"{cell.latitude:.2f}_{cell.longitude:.2f}.json"
-        if path.exists():
+        filename = f"{cell.latitude:.2f}_{cell.longitude:.2f}.json"
+        for directory, covered in cached_ranges:
             try:
-                frame = _hourly_frame(json.loads(path.read_text()), expected)
-            except (ValueError, TypeError):
-                pending.append((cell, path))
-            else:
-                total += frame.to_numpy(dtype=float) * cell.weight
+                frame = _hourly_frame(json.loads((directory / filename).read_text()), covered)
+            except (FileNotFoundError, ValueError, TypeError):
+                continue
+            total += frame.loc[expected].to_numpy(dtype=float) * cell.weight
+            break
         else:
-            pending.append((cell, path))
+            pending.append((cell, target_cache / filename))
     for offset in range(0, len(pending), batch_size):
         batch = pending[offset:offset + batch_size]
         payload = _download_batch({

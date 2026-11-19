@@ -9,7 +9,7 @@ from ind320.analysis.forecast import FEATURE_LAGS, MIN_INTERVAL_ERRORS, SEASON, 
 from ind320.analysis.forecast_defaults import DEFAULT_INPUTS, DEFAULT_ORDER
 from ind320.data.reservoirs import fetch_reservoir_history
 from ind320.data.transfers import CONNECTIONS
-from ind320.data.weeks import WEEK, cutoff_time, reservoir_weeks
+from ind320.data.weeks import WEATHER_FEATURES, WEEK, cutoff_time, reservoir_weeks
 from ind320.ui.area_controls import AREAS, WEATHER_AREAS, area_selection
 from ind320.ui.forecast_chart import forecast_chart
 from ind320.ui.source_cache import exchange_weeks, flow_weeks, weather_weeks
@@ -68,6 +68,8 @@ if submitted:
     st.session_state.pop("last_forecast", None)
     try:
         sources = {}
+        omitted_weather = ()
+        weather_features = tuple(feature for feature in features if feature in WEATHER_FEATURES)
         if {"EUR/NOK", "USD/NOK"}.intersection(features):
             fx = exchange_weeks(first, last + WEEK)
             for feature in ("EUR/NOK", "USD/NOK"):
@@ -75,19 +77,29 @@ if submitted:
                     if feature not in fx.index.get_level_values("pair"):
                         raise ValueError(f"No exchange-rate coverage for {feature}.")
                     sources[feature] = fx.xs(feature, level="pair").rename(columns={"nok_per_unit": feature})
-        if {"temperature_2m", "precipitation"}.intersection(features):
+        if weather_features:
             latest_weather = last
             while ((latest_weather + pd.Timedelta(days=1)).tz_localize("Europe/Oslo")
                    + pd.Timedelta(days=5) > cutoff):
                 latest_weather -= WEEK
-            weather = weather_weeks(WEATHER_AREAS[area], first - 2 * WEEK, latest_weather)
-            sources.update({feature: weather for feature in ("temperature_2m", "precipitation")})
+            try:
+                weather = weather_weeks(WEATHER_AREAS[area], first - 2 * WEEK, latest_weather)
+            except requests.HTTPError as error:
+                if error.response is None or error.response.status_code != 429:
+                    raise
+                # Keep the requested settings so a later run can try weather again.
+                omitted_weather = weather_features
+            else:
+                sources.update({feature: weather for feature in weather_features})
         if "net_import_mwh" in features:
             sources["net_import_mwh"] = flow_weeks(connection, first - FEATURE_LAGS["net_import_mwh"] * WEEK, last)
         with st.spinner("Fitting the forecast and estimating the interval…"):
             result = forecast_reservoir(history, sources, area=area, cutoff=cutoff,
                                         training_weeks=training_weeks, horizon=horizon,
-                                        order=(p, d, q), selected_inputs=features)
+                                        order=(p, d, q), selected_inputs=tuple(
+                                            feature for feature in features if feature not in omitted_weather
+                                        ))
+        result.attrs["omitted_weather"] = omitted_weather
         st.session_state["last_forecast"] = (selection, result)
     except PyMongoError:
         st.error("MongoDB flow data could not be read. Check connectivity or rerun with other inputs.")
@@ -97,6 +109,10 @@ if submitted:
 saved = st.session_state.get("last_forecast")
 if saved and saved[0] == selection and "interval_samples" in saved[1]:
     result = saved[1]
+    if omitted := result.attrs.get("omitted_weather"):
+        names = ", ".join(FEATURE_NAMES[feature] for feature in omitted)
+        st.warning(f"Open-Meteo reached its request limit. This forecast ran without {names}. "
+                   "Run it again after the quota resets to include weather.")
     observed = published.set_index("week")["Fill Level"] * 100
     st.plotly_chart(forecast_chart(observed, result))
     pending = result.index[result.index.date < end]

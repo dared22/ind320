@@ -166,6 +166,20 @@ class WeatherSamplingTests(unittest.TestCase):
             pd.testing.assert_frame_equal(result, fetch_weather(*dates, cache_dir=Path(cache)))
             self.assertEqual(get.call_count, 3)
 
+    def test_narrower_dates_reuse_weather_cached_for_a_longer_range(self):
+        limit = requests.Response()
+        limit.status_code = 429
+        limit._content = b'{"reason":"Hourly API request limit exceeded."}'
+        with tempfile.TemporaryDirectory() as cache, patch(
+            'ind320.data.weather.load_weather_coordinates', return_value=sampled_points()
+        ), patch('ind320.data.weather.requests.get', side_effect=weather_response) as get:
+            wider = fetch_weather('NO3', '2024-02-28', '2024-03-01', cache_dir=Path(cache))
+            get.reset_mock(side_effect=True)
+            get.return_value = limit
+            narrower = fetch_weather('NO3', '2024-02-29', '2024-02-29', cache_dir=Path(cache))
+            pd.testing.assert_frame_equal(narrower, wider.loc['2024-02-29'])
+            get.assert_not_called()
+
     def test_rate_limit_wait_is_bounded_and_daily_limit_returns_promptly(self):
         for period, attempts in [('Minutely', 3), ('Daily', 1)]:
             with self.subTest(period=period), tempfile.TemporaryDirectory() as cache, patch(

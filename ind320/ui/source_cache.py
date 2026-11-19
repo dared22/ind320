@@ -13,7 +13,7 @@ transfer_annual = st.cache_data(ttl=300)(query_annual)
 transfer_months = st.cache_data(ttl=300)(query_months)
 
 
-@st.cache_data(ttl=86400, show_spinner="Loading the ERA5 weather archive…")
+@st.cache_data(ttl=86400, show_spinner="Loading the ERA5 weather archive. First downloads may take several minutes.")
 def weather_for_year(area: str, year: int) -> pd.DataFrame:
     """Use full years for the daily quality analyses."""
     return fetch_weather(area, f"{year}-01-01", f"{year}-12-31")

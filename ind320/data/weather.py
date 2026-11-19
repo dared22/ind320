@@ -1,6 +1,7 @@
 """Hourly ERA5 averages over all 1,000 reproducibly sampled points per area."""
 
 import json
+import time
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
@@ -56,6 +57,34 @@ def _hourly_frame(payload: dict, expected: pd.DatetimeIndex) -> pd.DataFrame:
     return hourly
 
 
+def _download_batch(params: dict) -> dict | list:
+    """Retry a minute quota failure without repeating earlier batches."""
+    for attempt in range(3):
+        response = requests.get(WEATHER_API, params=params, timeout=(10, 120))
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as error:
+            # Preserve Open-Meteo's explanation for longer quotas and other errors.
+            try:
+                reason = response.json().get("reason")
+            except (ValueError, AttributeError):
+                reason = None
+            if not isinstance(reason, str) or not reason:
+                raise
+            if (response.status_code == 429 and attempt < 2
+                    and reason.lower().startswith("minutely api request limit")):
+                # Allow a full minute if the archive omits Retry-After in seconds.
+                retry_after = response.headers.get("Retry-After", "").strip()
+                delay = int(retry_after) if retry_after.isdecimal() else 65
+                if delay <= 120:
+                    time.sleep(max(1, delay))
+                    continue
+            raise requests.HTTPError(
+                f"Open-Meteo HTTP {response.status_code}: {reason}", response=response,
+            ) from error
+        return response.json()
+
+
 def fetch_weather(
     area: str, start_date: str, end_date: str, *,
     batch_size: int = 20, cache_dir: Path | None = None,
@@ -96,37 +125,17 @@ def fetch_weather(
             pending.append((cell, path))
     for offset in range(0, len(pending), batch_size):
         batch = pending[offset:offset + batch_size]
-        response = requests.get(
-            WEATHER_API,
-            params={
-                "latitude": ",".join(str(cell.latitude) for cell, _ in batch),
-                "longitude": ",".join(str(cell.longitude) for cell, _ in batch),
-                "start_date": start.strftime("%Y-%m-%d"),
-                "end_date": end.strftime("%Y-%m-%d"),
-                "hourly": ",".join(WEATHER_COLUMNS), "models": "era5",
-                "timezone": "UTC", "cell_selection": "nearest",
-                # Unlike timezone, elevation is not broadcast across locations.
-                # Supply one nan per cell to disable downscaling for the batch.
-                "elevation": ",".join("nan" for _ in batch),
-            },
-            timeout=(10, 120),
-        )
-        try:
-            response.raise_for_status()
-        except requests.HTTPError as error:
-            # Open-Meteo explains invalid parameters/rate limits in JSON. Keep
-            # that explanation in the UI instead of only showing a long URL.
-            try:
-                reason = response.json().get("reason")
-            except (ValueError, AttributeError):
-                reason = None
-            if isinstance(reason, str) and reason:
-                raise requests.HTTPError(
-                    f"Open-Meteo HTTP {response.status_code}: {reason}",
-                    response=response,
-                ) from error
-            raise
-        payload = response.json()
+        payload = _download_batch({
+            "latitude": ",".join(str(cell.latitude) for cell, _ in batch),
+            "longitude": ",".join(str(cell.longitude) for cell, _ in batch),
+            "start_date": start.strftime("%Y-%m-%d"),
+            "end_date": end.strftime("%Y-%m-%d"),
+            "hourly": ",".join(WEATHER_COLUMNS), "models": "era5",
+            "timezone": "UTC", "cell_selection": "nearest",
+            # Unlike timezone, elevation is not broadcast across locations.
+            # Supply one nan per cell to disable downscaling for the batch.
+            "elevation": ",".join("nan" for _ in batch),
+        })
         records = payload if isinstance(payload, list) else [payload]
         if len(records) != len(batch):
             raise ValueError("ERA5 returned a different number of grid cells than requested.")

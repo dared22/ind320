@@ -143,6 +143,46 @@ class WeatherSamplingTests(unittest.TestCase):
                 self.assertEqual(get.call_args.kwargs['params']['latitude'], '61.0')
                 np.testing.assert_allclose(result.precipitation, 1.1)
 
+    def test_minutely_limit_retries_only_the_failed_batch(self):
+        minute_limit = requests.Response()
+        minute_limit.status_code = 429
+        minute_limit.headers['Retry-After'] = '72'
+        minute_limit._content = b'{"reason":"Minutely API request limit exceeded."}'
+
+        def get_batch(*args, **kwargs):
+            if get.call_count == 2:
+                return minute_limit
+            return weather_response(*args, **kwargs)
+
+        with tempfile.TemporaryDirectory() as cache, patch(
+            'ind320.data.weather.load_weather_coordinates', return_value=sampled_points()
+        ), patch('ind320.data.weather.requests.get', side_effect=get_batch) as get, patch('time.sleep') as sleep:
+            dates = ('NO3', '2024-01-01', '2024-01-01')
+            result = fetch_weather(*dates, batch_size=1, cache_dir=Path(cache))
+            self.assertEqual([call.kwargs['params']['latitude'] for call in get.call_args_list],
+                             ['60.0', '61.0', '61.0'])
+            sleep.assert_called_once_with(72)
+            np.testing.assert_allclose(result.precipitation, 1.1)
+            pd.testing.assert_frame_equal(result, fetch_weather(*dates, cache_dir=Path(cache)))
+            self.assertEqual(get.call_count, 3)
+
+    def test_rate_limit_wait_is_bounded_and_daily_limit_returns_promptly(self):
+        for period, attempts in [('Minutely', 3), ('Daily', 1)]:
+            with self.subTest(period=period), tempfile.TemporaryDirectory() as cache, patch(
+                'ind320.data.weather.load_weather_coordinates', return_value=sampled_points()
+            ), patch('time.sleep') as sleep:
+                response = requests.Response()
+                response.status_code = 429
+                reason = f'{period} API request limit exceeded.'
+                response._content = f'{{"reason":"{reason}"}}'.encode()
+                with patch('ind320.data.weather.requests.get', return_value=response) as get:
+                    with self.assertRaisesRegex(requests.HTTPError, reason):
+                        fetch_weather('NO3', '2024-01-01', '2024-01-01', cache_dir=Path(cache))
+                self.assertEqual(get.call_count, attempts)
+                self.assertEqual(sleep.call_count, attempts - 1)
+                if period == 'Minutely':
+                    self.assertTrue(all(call.args[0] >= 60 for call in sleep.call_args_list))
+
     def test_missing_hour_rejected(self):
         def incomplete(*args, **kwargs):
             response = weather_response(*args, **kwargs)

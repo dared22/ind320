@@ -3,6 +3,11 @@ import pandas as pd
 import plotly.graph_objects as go
 from matplotlib.figure import Figure
 
+from ind320.ui.palette import GREEN, WARM_ACCENT
+
+# Keep each direction recognizable across both interactive charts.
+DIRECTION_COLORS = {"import": GREEN, "export": WARM_ACCENT}
+
 
 def energy_pie(summary: pd.DataFrame) -> Figure:
     """Show observed energy; the caller displays coverage alongside the figure."""
@@ -66,7 +71,8 @@ def interactive_energy_pie(summary: pd.DataFrame) -> go.Figure:
     title = "Annual transferred energy (MWh)" if complete else "Observed transferred energy (MWh)"
     fig = go.Figure(layout={"title": title})
     if values.notna().all() and values.sum() > 0 and values.ge(0).all():
-        fig.add_trace(go.Pie(labels=["Import", "Export"], values=values))
+        fig.add_trace(go.Pie(labels=["Import", "Export"], values=values,
+                             marker={"colors": [DIRECTION_COLORS[direction] for direction in values.index]}))
     else:
         fig.add_annotation(text="No two-direction energy total available", showarrow=False)
         fig.update_xaxes(visible=False)
@@ -91,6 +97,7 @@ def interactive_transfer_lines(data: pd.DataFrame) -> go.Figure:
             y.append(power)
             hover.append(oslo)
         fig.add_trace(go.Scatter(x=x, y=y, mode="lines+markers", marker={"size": 2},
+                                 line={"color": DIRECTION_COLORS.get(direction)},
                                  name=direction.title(), connectgaps=False, text=hover,
                                  hovertemplate="%{text}<br>%{y:.2f} MW"))
     fig.update_layout(xaxis_title="Time (UTC)", yaxis_title="Physical flow (MW)")

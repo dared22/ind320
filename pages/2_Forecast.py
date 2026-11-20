@@ -11,7 +11,7 @@ from ind320.data.reservoirs import fetch_reservoir_history
 from ind320.data.transfers import CONNECTIONS
 from ind320.data.weeks import WEATHER_FEATURES, WEEK, cutoff_time, reservoir_weeks
 from ind320.ui.area_controls import AREAS, WEATHER_AREAS, area_selection
-from ind320.ui.forecast_chart import forecast_chart
+from ind320.ui.forecast_chart import ANIMATION_OPTIONS, forecast_chart
 from ind320.ui.source_cache import exchange_weeks, flow_weeks, weather_weeks
 from ind320.ui.time_controls import timeframe
 
@@ -114,7 +114,13 @@ if saved and saved[0] == selection and "interval_samples" in saved[1]:
         st.warning(f"Open-Meteo reached its request limit. This forecast ran without {names}. "
                    "Run it again after the quota resets to include weather.")
     observed = published.set_index("week")["Fill Level"] * 100
-    st.plotly_chart(forecast_chart(observed, result))
+    chart = forecast_chart(observed, result, autoplay=submitted)
+    # Plotly's HTML renderer starts the animation after loading the forecast frames.
+    chart_html = chart.to_html(
+        full_html=False, auto_play=submitted, animation_opts=ANIMATION_OPTIONS,
+        config={"displaylogo": False, "modeBarButtonsToRemove": ["select2d", "lasso2d"]},
+    )
+    st.iframe("<style>body { margin: 0; }</style>" + chart_html, height=chart.layout.height)
     pending = result.index[result.index.date < end]
     if len(pending):
         st.caption(f"An NVE reading is pending for the week ending {pending[-1]:%d %b %Y}.")

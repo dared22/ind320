@@ -9,13 +9,13 @@ from unittest.mock import Mock, patch
 import numpy as np
 import pandas as pd
 import requests
+from river.time_series import SNARIMAX
 from streamlit.proto.WidgetStates_pb2 import WidgetStates
 from streamlit.testing.v1 import AppTest
-from statsmodels.tsa.statespace.sarimax import SARIMAX
 
 from ind320.analysis.forecast import forecast_reservoir
 from ind320.data.exchange import fetch_exchange_rates
-from ind320.data.weeks import OSLO, cutoff_time, reservoir_weeks, weekly_flows, weekly_fx, weekly_weather
+from ind320.data.weeks import OSLO, combine_net_flows, cutoff_time, reservoir_weeks, weekly_flows, weekly_fx, weekly_weather
 from test_feedback_fixes import reservoir_fixture
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -59,6 +59,17 @@ class SourceAlignmentTests(unittest.TestCase):
         self.assertEqual(result.loc[week, "net_import_mwh"], 334)
         self.assertTrue(weekly_flows(periods.iloc[:1]).empty)
 
+    def test_combined_flows_use_area_sign_and_complete_weeks(self):
+        weeks = pd.date_range("2024-04-07", periods=2, freq="W-SUN")
+        published = pd.Timestamp("2024-04-08 01:00", tz=OSLO)
+        first = pd.DataFrame({"net_import_mwh": [300, 400], "available_at": published}, index=weeks)
+        second = pd.DataFrame({"net_import_mwh": [500], "available_at": published + pd.Timedelta(hours=1)},
+                              index=weeks[:1])
+        combined = combine_net_flows({"NO1–NO3": first, "NO3–NO5": second}, "NO3")
+        self.assertEqual(combined.index.tolist(), weeks[:1].tolist())
+        self.assertEqual(combined.iloc[0].net_import_mwh, 200)
+        self.assertEqual(combined.iloc[0].available_at, published + pd.Timedelta(hours=1))
+
     def test_nve_next_release_belongs_to_following_week(self):
         source = pd.DataFrame({
             "Area Type": "EL", "Area Code": 3, "Iso Year": 2024, "Iso Week": [12, 13],
@@ -70,6 +81,28 @@ class SourceAlignmentTests(unittest.TestCase):
 
 
 class ForecastTests(unittest.TestCase):
+    def test_forecast_runs_with_multiple_net_flow_connections(self):
+        def flows(connection, first, last):
+            weeks = pd.date_range(first, last, freq="W-SUN")
+            return pd.DataFrame({
+                "net_import_mwh": 50000 + 20000 * np.sin(np.arange(len(weeks)) / 9),
+                "available_at": (weeks + pd.Timedelta(days=1, hours=1)).tz_localize(OSLO),
+            }, index=weeks)
+
+        with patch("ind320.data.reservoirs.fetch_reservoir_history", return_value=reservoir_fixture()), patch(
+            "ind320.ui.source_cache.flow_weeks", side_effect=flows
+        ) as download, patch("ind320.analysis.forecast.forecast_reservoir", wraps=forecast_reservoir) as fit:
+            app = AppTest.from_file(str(ROOT / "app.py"), default_timeout=30).run()
+            app.switch_page("pages/2_Forecast.py").run()
+            selected = ["NO3–SE2", "NO1–NO3"]
+            app.multiselect[1].set_value(selected)
+            app.button[0].click().run()
+            self.assertFalse(app.exception)
+            self.assertFalse(app.error, [item.value for item in app.error])
+            self.assertEqual([call.args[0] for call in download.call_args_list], selected)
+            self.assertEqual(fit.call_args.kwargs["selected_inputs"], ("net_import_mwh",))
+            self.assertEqual(len(app.session_state["last_forecast"][1]), 13)
+
     def test_hourly_weather_limit_runs_forecast_with_a_persistent_notice(self):
         limit = requests.Response()
         limit.status_code = 429
@@ -149,20 +182,23 @@ class ForecastTests(unittest.TestCase):
         self.assertTrue((after["median"] <= after.upper).all())
         self.assertEqual(after.attrs["training_end"], pd.Timestamp("2022-12-11"))
 
-    def test_map_and_forecast_share_dates_and_horizon(self):
+    def test_map_and_forecast_share_dates_but_horizon_is_forecast_only(self):
         with patch("ind320.data.reservoirs.fetch_reservoir_history", return_value=reservoir_fixture()):
             app = AppTest.from_file(str(ROOT / "app.py"), default_timeout=30).run()
             app.date_input(key="overview_start").set_value(date(2020, 2, 1)).run()
             app.date_input(key="overview_end").set_value(date(2023, 1, 15)).run()
-            app.slider(key="overview_horizon").set_value(17).run()
+            self.assertFalse(any(slider.label == "Forecast horizon (weeks)" for slider in app.slider))
             app.switch_page("pages/2_Forecast.py").run()
             self.assertFalse(app.exception)
             self.assertEqual(app.date_input(key="forecast_start").value, date(2020, 2, 1))
             self.assertEqual(app.date_input(key="forecast_end").value, date(2023, 1, 15))
-            self.assertEqual(app.slider(key="forecast_horizon").value, 17)
             app.slider(key="forecast_horizon").set_value(9).run()
+            app.date_input(key="forecast_end").set_value(date(2023, 1, 29)).run()
             app.switch_page("pages/0_Home.py").run()
-            self.assertEqual(app.slider(key="overview_horizon").value, 9)
+            self.assertEqual(app.date_input(key="overview_end").value, date(2023, 1, 29))
+            self.assertFalse(any(slider.label == "Forecast horizon (weeks)" for slider in app.slider))
+            app.switch_page("pages/2_Forecast.py").run()
+            self.assertEqual(app.slider(key="forecast_horizon").value, 9)
 
 
     def test_polygon_selection_updates_the_saved_area_and_outline(self):
@@ -194,7 +230,7 @@ class ForecastTests(unittest.TestCase):
             self.assertEqual(norway["area_type"], "NO")
             self.assertEqual(norway["thickness"], 1.25)
 
-    def test_forecast_fits_classical_sarimax_with_selected_fx_inputs(self):
+    def test_forecast_fits_river_snarimax_with_selected_fx_inputs(self):
         def rates(start, end):
             dates = pd.date_range(start, end, freq="B")
             return pd.concat([pd.DataFrame({
@@ -205,8 +241,10 @@ class ForecastTests(unittest.TestCase):
         with patch("ind320.data.reservoirs.fetch_reservoir_history", return_value=reservoir_fixture()), patch(
             "ind320.ui.source_cache.fetch_exchange_rates", side_effect=rates
         ), patch(
-            "ind320.analysis.forecast.SARIMAX", wraps=SARIMAX
-        ) as fit_model:
+            "ind320.analysis.forecast.time_series.SNARIMAX", wraps=SNARIMAX
+        ) as fit_model, patch.object(
+            SNARIMAX, "forecast", autospec=True, side_effect=SNARIMAX.forecast
+        ) as predict:
             app = AppTest.from_file(str(ROOT / "app.py"), default_timeout=90).run()
             app.switch_page("pages/2_Forecast.py").run()
             app.multiselect[0].set_value(["EUR/NOK", "USD/NOK"])
@@ -214,8 +252,10 @@ class ForecastTests(unittest.TestCase):
             self.assertFalse(app.exception)
             self.assertFalse(app.error, [item.value for item in app.error])
             model_settings = fit_model.call_args_list[0].kwargs
-            self.assertEqual(model_settings["seasonal_order"], (1, 0, 0, 52))
-            self.assertEqual(list(model_settings["exog"]), ["EUR/NOK", "USD/NOK"])
+            self.assertEqual((model_settings["sp"], model_settings["m"]), (1, 52))
+            future_inputs = predict.call_args.kwargs["xs"]
+            self.assertEqual(len(future_inputs), 13)
+            self.assertTrue(all({"EUR/NOK", "USD/NOK"} <= features.keys() for features in future_inputs))
             result = app.session_state["last_forecast"][1]
             self.assertEqual(len(result), 13)
             self.assertTrue((result.lower <= result["median"]).all())

@@ -13,15 +13,15 @@ def _save_time(widget: str, saved: str) -> None:
     st.session_state[saved] = st.session_state[widget]
 
 
-def timeframe(page: str, history: pd.DataFrame) -> tuple[date, date, int]:
-    """Use separate widget keys and persistent values shared by both pages."""
+def timeframe(page: str, history: pd.DataFrame) -> tuple[date, date]:
+    """Share the historical dates using separate widget keys for each page."""
     today = pd.Timestamp.now(tz=OSLO).date()
     first = history.week.min().date()
     published = history.loc[history.available_at.le(cutoff_time(today)), "week"]
     latest = published.max().date() if not published.empty else first
     default_start = max(first, latest - timedelta(weeks=DEFAULT_TRAINING_WEEKS - 1))
 
-    start_col, end_col, horizon_col = st.columns(3)
+    start_col, end_col = st.columns(2)
     with start_col:
         key = f"{page}_start"
         st.session_state[key] = st.session_state.get("history_start", default_start)
@@ -32,12 +32,15 @@ def timeframe(page: str, history: pd.DataFrame) -> tuple[date, date, int]:
         st.session_state[key] = st.session_state.get("history_end", today)
         end = st.date_input("Historical end", min_value=first, max_value=today,
                             key=key, on_change=_save_time, args=(key, "history_end"))
-    with horizon_col:
-        key = f"{page}_horizon"
-        st.session_state[key] = st.session_state.get("forecast_horizon", DEFAULT_HORIZON)
-        horizon = st.slider("Forecast horizon (weeks)", 4, 26, key=key,
-                            on_change=_save_time, args=(key, "forecast_horizon"))
     if start > end:
         st.info("Choose a historical start on or before the end date.")
         st.stop()
-    return start, end, horizon
+    return start, end
+
+
+def forecast_horizon() -> int:
+    """Keep the Forecast setting when navigating away from its widget."""
+    key, saved = "forecast_horizon", "saved_forecast_horizon"
+    st.session_state[key] = st.session_state.get(saved, st.session_state.get(key, DEFAULT_HORIZON))
+    return st.slider("Forecast horizon (weeks)", 4, 26, key=key,
+                     on_change=_save_time, args=(key, saved))

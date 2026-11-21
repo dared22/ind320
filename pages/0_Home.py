@@ -51,7 +51,7 @@ except requests.RequestException:
     st.error("NVE could not be reached. Reload the page to try again.")
     st.stop()
 
-start, end, _ = timeframe("overview", history)
+start, end = timeframe("overview", history)
 cutoff = cutoff_time(end)
 observed = history.loc[
     history.week.between(pd.Timestamp(start), pd.Timestamp(end)) & history.available_at.le(cutoff)

@@ -4,7 +4,7 @@ from datetime import date
 
 import pandas as pd
 
-from ind320.data.transfers import clip_intervals
+from ind320.data.transfers import FORECAST_CONNECTIONS, clip_intervals
 from ind320.data.weather import fetch_weather
 
 OSLO = "Europe/Oslo"
@@ -107,6 +107,25 @@ def weekly_flows(data: pd.DataFrame) -> pd.DataFrame:
         if {"import", "export"} <= energy.keys():
             result.append((week, energy["import"] - energy["export"], end + pd.Timedelta(hours=1)))
     return pd.DataFrame(result, columns=["week", *columns]).set_index("week")
+
+
+def combine_net_flows(flows: dict[str, pd.DataFrame], zone: str) -> pd.DataFrame:
+    """Sum the chosen borders in weeks with complete data on every border."""
+    signed = []
+    for connection, frame in flows.items():
+        if frame.empty:
+            raise ValueError(f"No ENTSO-E net flow data for {connection} in the selected period.")
+        left, right = FORECAST_CONNECTIONS[connection]
+        if zone not in (left, right):
+            raise ValueError(f"{connection} does not connect to {zone}.")
+        # Stored imports are positive into the left zone. Reverse for the other endpoint.
+        net = frame.net_import_mwh if zone == left else -frame.net_import_mwh
+        signed.append(frame.assign(net_import_mwh=net))
+    aligned = pd.concat(signed, axis=1, keys=flows, join="inner").swaplevel(axis=1)
+    return pd.DataFrame({
+        "net_import_mwh": aligned["net_import_mwh"].sum(axis=1, min_count=len(flows)),
+        "available_at": aligned["available_at"].max(axis=1),
+    })
 
 
 def rolling_weather_correlation(

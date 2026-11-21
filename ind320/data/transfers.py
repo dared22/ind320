@@ -9,13 +9,13 @@ from ind320.config import get_setting
 
 API_URL = "https://web-api.tp.entsoe.eu/api"
 SOURCE = "ENTSO-E Transparency Platform, A11 cross-border physical flows"
-# Bidding-zone pairs only: no Norwegian internal borders or country aggregates.
 # EIC area codes: ENTSO-E API reference, Area list. NO2–GB uses the GB domain.
 ZONES = {
     "NO1": "10YNO-1--------2",
     "NO2": "10YNO-2--------T",
     "NO3": "10YNO-3--------J",
     "NO4": "10YNO-4--------9",
+    "NO5": "10Y1001A1001A48H",
     "SE1": "10Y1001A1001A44P",
     "SE2": "10Y1001A1001A45N",
     "SE3": "10Y1001A1001A46L",
@@ -41,6 +41,16 @@ CONNECTIONS = {
         ("NO4", "RU"),
     ]
 }
+# Preserve the international links used by the transfer overview. The forecast
+# also uses physical flows between Norwegian bidding zones.
+DOMESTIC_CONNECTIONS = {
+    f"{a}–{b}": (a, b)
+    for a, b in [("NO1", "NO2"), ("NO1", "NO3"), ("NO1", "NO5"),
+                 ("NO2", "NO5"), ("NO3", "NO4"), ("NO3", "NO5")]
+}
+FORECAST_CONNECTIONS = {**CONNECTIONS, **DOMESTIC_CONNECTIONS}
+# The archive has no observed flows for this border.
+FORECAST_CONNECTIONS.pop("NO4–RU")
 COLUMNS = ["connection", "direction", "start", "end", "power_mw", "energy_mwh"]
 
 
@@ -123,8 +133,8 @@ def fetch_month(
 ) -> pd.DataFrame:
     """Request one month without printing URLs that contain the API token."""
     start, end = month_bounds(year, month)
-    no, foreign = CONNECTIONS[connection]
-    origin, destination = (foreign, no) if direction == "import" else (no, foreign)
+    left, right = DOMESTIC_CONNECTIONS.get(connection) or CONNECTIONS[connection]
+    origin, destination = (right, left) if direction == "import" else (left, right)
     try:
         response = session.get(
             API_URL,

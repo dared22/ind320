@@ -1,4 +1,4 @@
-"""Draw a fixed-axis Plotly animation of the SARIMAX forecast and interval."""
+"""Draw a fixed-axis Plotly animation of the reservoir forecast and interval."""
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -10,7 +10,7 @@ ANIMATION_OPTIONS = {"mode": "immediate", "frame": {"duration": 350, "redraw": F
 
 
 def forecast_chart(observed: pd.Series, forecast: pd.DataFrame, *, autoplay: bool = False) -> go.Figure:
-    """Reveal the median and shaded interval one week at a time."""
+    """Reveal the point forecast and shaded interval one week at a time."""
     fig = go.Figure(go.Scatter(x=observed.index, y=observed, name="Observed",
                                line={"color": GREEN}))
 
@@ -24,7 +24,7 @@ def forecast_chart(observed: pd.Series, forecast: pd.DataFrame, *, autoplay: boo
                        fill="tonexty", fillcolor=PLOT_BAND,
                        name="Nominal 80% interval", hoverinfo="skip",
                        showlegend=bool(data.upper.notna().any())),
-            go.Scatter(x=dates, y=[anchor, *data["median"]], name="Median forecast",
+            go.Scatter(x=dates, y=[anchor, *data["median"]], name="Point forecast",
                        line={"color": WARM_ACCENT, "dash": "dash"}),
         ]
 

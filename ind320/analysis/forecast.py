@@ -1,14 +1,11 @@
-"""Classical SARIMAX forecasts with River quantile-loss intervals."""
+"""River SNARIMAX forecasts with lead-time prediction intervals."""
 
-import warnings
 from bisect import bisect_left
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 
 import numpy as np
 import pandas as pd
-from river import optim
-from statsmodels.tools.sm_exceptions import ConvergenceWarning, EstimationWarning
-from statsmodels.tsa.statespace.sarimax import SARIMAX, SARIMAXResultsWrapper
+from river import optim, time_series
 
 from ind320.data.weeks import OSLO, WEEK
 
@@ -37,35 +34,10 @@ def _future_inputs(
     return inputs
 
 
-def _fit_sarimax(
-    target: pd.Series, inputs: pd.DataFrame, order: tuple[int, int, int],
-) -> tuple[SARIMAXResultsWrapper, Callable[[pd.DataFrame], pd.DataFrame | None]]:
-    """Fit the state-space SARIMAX and reuse the training scale for new inputs."""
-    center = inputs.mean()
-    scale = inputs.std(ddof=0).replace(0, 1)
-
-    def scale_inputs(values: pd.DataFrame) -> pd.DataFrame | None:
-        return (values - center) / scale if len(values.columns) else None
-
-    model = SARIMAX(
-        target, exog=scale_inputs(inputs), order=order, seasonal_order=(1, 0, 0, SEASON),
-        trend="n" if order[1] else "c",
-    )
-    try:
-        with warnings.catch_warnings():
-            # Statsmodels can replace its starting values with zeros and still converge.
-            warnings.simplefilter("ignore", EstimationWarning)
-            warnings.simplefilter("ignore", ConvergenceWarning)
-            fit = model.fit(disp=False, cov_type="none", maxiter=75)
-            if not fit.mle_retvals["converged"] and np.isfinite(fit.params).all():
-                # Retry from the first fit when the gradient optimizer struggles.
-                fit = model.fit(start_params=fit.params, method="powell",
-                                disp=False, cov_type="none", maxiter=60)
-    except np.linalg.LinAlgError as error:
-        raise ValueError("SARIMAX could not fit this series. Try another order or training window.") from error
-    if not fit.mle_retvals["converged"] or not np.isfinite(fit.params).all():
-        raise ValueError("SARIMAX did not converge. Try another order or training window.")
-    return fit, scale_inputs
+def _predict(model: time_series.SNARIMAX, inputs: pd.DataFrame) -> np.ndarray:
+    """Forecast each week with a separate feature dictionary for River's lag features."""
+    weekly_features = list(inputs.to_dict("index").values())
+    return np.asarray(model.forecast(horizon=len(inputs), xs=weekly_features))
 
 
 def _error_quantile(errors: np.ndarray, alpha: float) -> float:
@@ -80,24 +52,21 @@ def _error_quantile(errors: np.ndarray, alpha: float) -> float:
     return float(ordered[bisect_left(ordered, -1e-12, key=gradient_right_of)])
 
 
-def _historical_errors(
+def _train_snarimax(
     target: pd.Series, actual: pd.Series, releases: pd.Series, inputs: pd.DataFrame,
-    sources: dict[str, pd.DataFrame], order: tuple[int, int, int], horizon: int,
-) -> np.ndarray:
-    """Score earlier SARIMAX forecasts using only data known at each origin."""
+    sources: dict[str, pd.DataFrame], order: tuple[int, int, int], horizon: int, intervals: bool,
+) -> tuple[time_series.SNARIMAX, np.ndarray | None]:
+    """Train in order and optionally score forecasts as each origin is reached."""
+    p, d, q = order
+    model = time_series.SNARIMAX(p=p, d=d, q=q, m=SEASON, sp=1)
     start = max(SEASON, len(target) - SEASON)
-    errors = np.full((len(target) - start, horizon), np.nan)
-    try:
-        fit, scale_inputs = _fit_sarimax(target.iloc[:start], inputs.iloc[:start], order)
-    except ValueError:
-        # An unstable fit on the shorter window still permits a full-window forecast.
-        return errors
+    errors = np.full((len(target) - start, horizon), np.nan) if intervals else None
     latest_release = releases.ffill().cummax()
-    for row in range(start - 1, len(target) - 1):
-        if row >= start:
-            update = slice(row, row + 1)
-            fit = fit.extend(target.iloc[update], exog=scale_inputs(inputs.iloc[update]))
-        if pd.isna(releases.iloc[row]):
+    # With no selected inputs, to_dict("index") still supplies one dictionary per week.
+    weekly_features = inputs.to_dict("index")
+    for row, (week, value) in enumerate(target.items()):
+        model.learn_one(value, x=weekly_features[week])
+        if errors is None or not start - 1 <= row < len(target) - 1 or pd.isna(releases.at[week]):
             continue
         targets = slice(row + 1, row + 1 + horizon)
         dates = target.index[targets]
@@ -106,10 +75,12 @@ def _historical_errors(
             features_at_origin = _future_inputs(sources, dates, origin)
         except ValueError:
             continue  # This historical origin has incomplete input coverage.
-        prediction = np.clip(fit.forecast(len(dates), exog=scale_inputs(features_at_origin)), 0, 1)
+        prediction = _predict(model, features_at_origin)
+        if not np.isfinite(prediction).all():
+            continue
         outcomes = actual.iloc[targets].where(releases.iloc[targets].gt(origin))
-        errors[row - start + 1, :len(dates)] = (outcomes.to_numpy() - prediction.to_numpy()) * 100
-    return errors
+        errors[row - start + 1, :len(dates)] = (outcomes.to_numpy() - prediction.clip(0, 1)) * 100
+    return model, errors
 
 
 def forecast_reservoir(
@@ -122,7 +93,8 @@ def forecast_reservoir(
 
     Each selected source is indexed by Sunday labels and provides its feature
     column plus an availability timestamp. No observations after cutoff are
-    used for training or recursive prediction.
+    used for training or recursive prediction. Point forecasts are returned in
+    the existing `median` column.
     """
     if cutoff.tzinfo is None or not 1 <= horizon <= 52 or training_weeks < 78:
         raise ValueError("Use a timezone-aware cutoff, at least 78 training weeks, and 1–52 forecast weeks.")
@@ -172,15 +144,13 @@ def forecast_reservoir(
         prepared_sources[feature] = source
     future_inputs = _future_inputs(prepared_sources, future, cutoff)
     result = pd.DataFrame(index=future)
-    fit, scale_inputs = _fit_sarimax(target, train_features, order)
-    # In the Gaussian SARIMAX model the point prediction is also the conditional median.
-    point = fit.forecast(horizon, exog=scale_inputs(future_inputs))
+    model, errors = _train_snarimax(target, actual, selected.available_at.reindex(past),
+                                    train_features, prepared_sources, order, horizon, intervals)
+    point = _predict(model, future_inputs)
     if not np.isfinite(point).all():
-        raise ValueError("SARIMAX returned non-finite predictions. Try another model order.")
+        raise ValueError("River SNARIMAX returned non-finite predictions. Try another model order.")
     result["median"] = point.clip(0, 1) * 100
-    if intervals:
-        errors = _historical_errors(target, actual, selected.available_at.reindex(past),
-                                    train_features, prepared_sources, order, horizon)
+    if errors is not None:
         samples = [column[np.isfinite(column)] for column in errors.T]
         result["interval_samples"] = [len(sample) for sample in samples]
         for name, alpha, bound in (("lower", 0.10, min), ("upper", 0.90, max)):

@@ -12,6 +12,7 @@ from ind320.data.transfers import (
     month_bounds,
     prepare_intervals,
 )
+from ind320.data.weeks import OSLO
 
 
 @contextmanager
@@ -120,3 +121,34 @@ def query_months(connection: str, year: int, months: list[int]) -> pd.DataFrame:
                     )
                 )
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+
+def publish_weekly_flows(connection: str, data: pd.DataFrame) -> None:
+    """Store verified weekly A11 net flows for the forecast archive."""
+    operations = []
+    for row in data.itertuples():
+        # Store the local Sunday label as a calendar date at UTC midnight.
+        key = f"{connection}|{row.Index:%Y-%m-%d}"
+        document = {"_id": key, "connection": connection, "week": row.Index.to_pydatetime(),
+                    "net_import_mwh": float(row.net_import_mwh),
+                    "available_at": row.available_at.to_pydatetime(), "source": SOURCE}
+        operations.append(ReplaceOne({"_id": key}, document, upsert=True))
+    if operations:
+        with mongo_database() as db:
+            db.forecast_flows.create_index([("connection", 1), ("week", 1)])
+            db.forecast_flows.bulk_write(operations, ordered=False)
+
+
+def query_weekly_flows(connection: str, first: pd.Timestamp, last: pd.Timestamp) -> pd.DataFrame:
+    """Read complete weekly flow records from the forecast archive."""
+    with mongo_database() as db:
+        records = list(db.forecast_flows.find(
+            {"connection": connection, "week": {"$gte": first.to_pydatetime(), "$lte": last.to_pydatetime()}},
+            {"_id": 0, "week": 1, "net_import_mwh": 1, "available_at": 1},
+        ))
+    if not records:
+        return pd.DataFrame(columns=["net_import_mwh", "available_at"], index=pd.DatetimeIndex([], name="week"))
+    frame = pd.DataFrame(records).set_index("week").sort_index()
+    frame.index = pd.to_datetime(frame.index, utc=True).tz_localize(None)
+    frame["available_at"] = pd.to_datetime(frame.available_at, utc=True).dt.tz_convert(OSLO)
+    return frame[["net_import_mwh", "available_at"]]

@@ -33,7 +33,7 @@ be lost on app restart.
 | `notebooks/project_notebook_ca1.ipynb` | Part 1 exploration; now retrieves the source through the API instead of a missing CSV |
 | `notebooks/project_notebook.ipynb` | Part 2: NVE, ENTSO-E, Spark/Cassandra and MongoDB |
 | `notebooks/project_notebook_part3.ipynb` | Part 3: sampling, weather, DCT/SPC, LOF, STL and spectrogram |
-| `notebooks/project_notebook_part4.ipynb` | Part 4: time alignment, correlation, SARIMAX backtesting and River forecast intervals |
+| `notebooks/project_notebook_part4.ipynb` | Part 4: time alignment, correlation, River SNARIMAX backtesting and forecast intervals |
 | `data/reservoir_areas.geojson` | WGS84 national, price-area and approximate water-area boundaries |
 | `ind320/data/` | API downloads, spatial sampling and preparation |
 | `ind320/analysis/` | Shared weather and reservoir calculations/figures |
